@@ -390,6 +390,94 @@ jobs:
           echo "✅ Created GitHub release v${{ needs.version-check.outputs.new_version }}"
           echo "📝 https://github.com/dataroadinc/dotenvage/releases/tag/v${{ needs.version-check.outputs.new_version }}"
 
+  # Update the Homebrew formula in dataroadinc/homebrew-tap
+  update-homebrew:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    needs: [create-release, version-check]
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - name: Check out tap repository
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        uses: actions/checkout@v6
+        with:
+          repository: dataroadinc/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Render dotenvage formula
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version-check.outputs.new_version }}
+        run: |
+          set -euo pipefail
+          mkdir -p shas
+          gh release download "v$VERSION" -R dataroadinc/dotenvage \
+            -p '*.sha256' -D shas --clobber
+          sha() { cut -d' ' -f1 < "shas/dotenvage-$1.sha256"; }
+          DARWIN_ARM="$(sha aarch64-apple-darwin)"
+          DARWIN_X86="$(sha x86_64-apple-darwin)"
+          LINUX_ARM="$(sha aarch64-unknown-linux-gnu)"
+          LINUX_X86="$(sha x86_64-unknown-linux-gnu)"
+          base="https://github.com/dataroadinc/dotenvage/releases/download/v$VERSION"
+          cat > tap/Formula/dotenvage.rb <<EOF
+          class Dotenvage < Formula
+            desc "Dotenv with age encryption: encrypt/decrypt secrets in .env files"
+            homepage "https://github.com/dataroadinc/dotenvage"
+            version "$VERSION"
+            license "CC-BY-SA-4.0"
+
+            on_macos do
+              on_arm do
+                url "$base/dotenvage-aarch64-apple-darwin.zip"
+                sha256 "$DARWIN_ARM"
+              end
+              on_intel do
+                url "$base/dotenvage-x86_64-apple-darwin.zip"
+                sha256 "$DARWIN_X86"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "$base/dotenvage-aarch64-unknown-linux-gnu.zip"
+                sha256 "$LINUX_ARM"
+              end
+              on_intel do
+                url "$base/dotenvage-x86_64-unknown-linux-gnu.zip"
+                sha256 "$LINUX_X86"
+              end
+            end
+
+            def install
+              bin.install "dotenvage"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/dotenvage --version")
+            end
+          end
+          EOF
+
+      - name: Commit and push formula
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        working-directory: tap
+        env:
+          VERSION: ${{ needs.version-check.outputs.new_version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- Formula/dotenvage.rb; then
+            echo "Formula already up to date for v$VERSION."
+            exit 0
+          fi
+          git add Formula/dotenvage.rb
+          git commit -m "feat: update dotenvage formula to v$VERSION"
+          git push
+
   # Publish all packages after release is created
   publish-all:
     name: Publish All Packages
