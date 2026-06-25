@@ -45,6 +45,12 @@ cargo install cargo-binstall
 cargo binstall dotenvage
 ```
 
+#### Using Homebrew (macOS / Linux)
+
+```bash
+brew install dataroadinc/tap/dotenvage
+```
+
 #### Using cargo install
 
 Build from source (slower, requires Rust toolchain):
