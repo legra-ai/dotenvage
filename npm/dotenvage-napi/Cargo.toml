@@ -18,6 +18,7 @@ age = { version = "0.11.3", features = ["armor"] }
 napi = { version = "3.8.6", default-features = false, features = [
     "napi6",
     "napi7",
+    "async",
     "serde-json",
 ] }
 napi-derive = "3.5.5"

@@ -5,17 +5,18 @@
 //! affected key; in that case we want the parent value to prevail,
 //! not be clobbered or wiped by a partial-failure error.
 
-use std::fs;
-
+use async_fs_io::TempDir;
 use dotenvage::{
     EnvLoader,
     SecretManager,
 };
-use tempfile::TempDir;
 
-#[test]
-fn foreign_key_value_is_dropped_other_values_load() {
-    let temp_dir = TempDir::new().unwrap();
+mod common;
+use common::write;
+
+#[tokio::test]
+async fn foreign_key_value_is_dropped_other_values_load() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let env_path = temp_dir.path().join(".env.local");
 
     let mine = SecretManager::generate().unwrap();
@@ -29,10 +30,10 @@ fn foreign_key_value_is_dropped_other_values_load() {
          FOREIGN_TOKEN={stranger_value}\n\
          PLAIN_VALUE=hello\n"
     );
-    fs::write(&env_path, contents).unwrap();
+    write(&env_path, contents).await.unwrap();
 
     let loader = EnvLoader::with_manager(mine);
-    let loaded = loader.load_env_file(&env_path).unwrap();
+    let loaded = loader.load_env_file(&env_path).await.unwrap();
 
     assert_eq!(
         loaded.get("WWKG_PASSPHRASE"),
@@ -51,19 +52,20 @@ fn foreign_key_value_is_dropped_other_values_load() {
     );
 }
 
-#[test]
-fn foreign_key_does_not_overwrite_parent_env() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn foreign_key_does_not_overwrite_parent_env() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let env_path = temp_dir.path().join(".env");
 
     let mine = SecretManager::generate().unwrap();
     let stranger = SecretManager::generate().unwrap();
     let stranger_value = stranger.encrypt_value("from-file").unwrap();
 
-    fs::write(
+    write(
         &env_path,
         format!("DOTENVAGE_PARENT_WINS={stranger_value}\n"),
     )
+    .await
     .unwrap();
 
     let key = "DOTENVAGE_PARENT_WINS";
@@ -74,7 +76,7 @@ fn foreign_key_does_not_overwrite_parent_env() {
     }
 
     let loader = EnvLoader::with_manager(mine);
-    let loaded = loader.load_from_dir(temp_dir.path()).unwrap();
+    let loaded = loader.load_from_dir(temp_dir.path()).await.unwrap();
     assert!(
         !loaded.is_empty(),
         "load should report files even if every value was foreign"

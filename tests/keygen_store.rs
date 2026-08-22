@@ -1,15 +1,20 @@
 //! CLI tests for keygen --store behavior.
 
-use std::fs;
 use std::process::Command;
 
 use assert_cmd::prelude::*;
+use async_fs_io::TempDir;
 use predicates::prelude::*;
-use tempfile::TempDir;
 
-#[test]
-fn keygen_store_os_rejects_output() {
-    let temp_dir = TempDir::new().unwrap();
+mod common;
+use common::{
+    read,
+    write,
+};
+
+#[tokio::test]
+async fn keygen_store_os_rejects_output() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let output = temp_dir.path().join("custom.key");
 
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("dotenvage"));
@@ -26,9 +31,9 @@ fn keygen_store_os_rejects_output() {
         ));
 }
 
-#[test]
-fn keygen_store_file_writes_to_output() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn keygen_store_file_writes_to_output() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let output = temp_dir.path().join("custom.key");
 
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("dotenvage"));
@@ -41,18 +46,18 @@ fn keygen_store_file_writes_to_output() {
         .assert()
         .success();
 
-    let content = fs::read_to_string(&output).unwrap();
+    let content = read(&output).await.unwrap();
     assert!(
         content.contains("AGE-SECRET-KEY-"),
         "generated key file should contain an AGE identity"
     );
 }
 
-#[test]
-fn keygen_store_file_force_required_for_existing_output() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn keygen_store_file_force_required_for_existing_output() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let output = temp_dir.path().join("existing.key");
-    fs::write(&output, "existing").unwrap();
+    write(&output, "existing").await.unwrap();
 
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("dotenvage"));
     cmd.current_dir(temp_dir.path())
@@ -77,7 +82,7 @@ fn keygen_store_file_force_required_for_existing_output() {
         .assert()
         .success();
 
-    let content = fs::read_to_string(&output).unwrap();
+    let content = read(&output).await.unwrap();
     assert!(
         content.contains("AGE-SECRET-KEY-"),
         "forced overwrite should write a valid AGE identity"

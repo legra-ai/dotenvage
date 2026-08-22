@@ -9,6 +9,7 @@ use ::dotenvage::{
     SecretManager,
 };
 use pyo3::prelude::*;
+use pyo3_async_runtimes::tokio::future_into_py;
 
 /// Wrapper for SecretManager in Python
 #[pyclass(name = "SecretManager")]
@@ -19,11 +20,13 @@ pub struct PySecretManager {
 #[pymethods]
 impl PySecretManager {
     /// Creates a new SecretManager by loading the key from standard locations
-    #[new]
-    fn new() -> PyResult<Self> {
-        Ok(Self {
-            inner: SecretManager::new()
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?,
+    #[staticmethod]
+    fn load_default<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        future_into_py(py, async move {
+            let inner = SecretManager::new()
+                .await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
+            Python::attach(|py| Py::new(py, PySecretManager { inner }))
         })
     }
 
@@ -85,11 +88,13 @@ pub struct PyEnvLoader {
 #[pymethods]
 impl PyEnvLoader {
     /// Creates a new EnvLoader with a default SecretManager
-    #[new]
-    fn new() -> PyResult<Self> {
-        Ok(Self {
-            inner: EnvLoader::new()
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?,
+    #[staticmethod]
+    fn load_default<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        future_into_py(py, async move {
+            let inner = EnvLoader::new()
+                .await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
+            Python::attach(|py| Py::new(py, PyEnvLoader { inner }))
         })
     }
 
@@ -104,102 +109,136 @@ impl PyEnvLoader {
     /// Loads `.env` files from the current directory in standard order.
     /// Decrypted values are loaded into the process environment.
     /// Returns the list of file paths that were actually loaded, in load order.
-    fn load(&self) -> PyResult<Vec<String>> {
-        let paths = self
-            .inner
-            .load()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
-        Ok(paths
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect())
+    fn load<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        future_into_py(py, async move {
+            let paths = inner
+                .load()
+                .await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
+            Ok(paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect::<Vec<String>>())
+        })
     }
 
     /// Loads `.env` files from a specific directory using the same order.
     /// Returns the list of file paths that were actually loaded, in load order.
-    fn load_from_dir(&self, dir: &str) -> PyResult<Vec<String>> {
-        let paths = self
-            .inner
-            .load_from_dir(Path::new(dir))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
-        Ok(paths
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect())
+    fn load_from_dir<'py>(&self, py: Python<'py>, dir: String) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        future_into_py(py, async move {
+            let paths = inner
+                .load_from_dir(Path::new(&dir))
+                .await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
+            Ok(paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect::<Vec<String>>())
+        })
     }
 
     /// Gets all variable names from all loaded `.env` files
-    fn get_all_variable_names(&self) -> PyResult<Vec<String>> {
-        self.inner
-            .get_all_variable_names()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))
+    fn get_all_variable_names<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        future_into_py(py, async move {
+            inner
+                .get_all_variable_names()
+                .await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))
+        })
     }
 
     /// Gets all variable names from `.env` files in a specific directory
-    fn get_all_variable_names_from_dir(&self, dir: &str) -> PyResult<Vec<String>> {
-        self.inner
-            .get_all_variable_names_from_dir(Path::new(dir))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))
+    fn get_all_variable_names_from_dir<'py>(
+        &self,
+        py: Python<'py>,
+        dir: String,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        future_into_py(py, async move {
+            inner
+                .get_all_variable_names_from_dir(Path::new(&dir))
+                .await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))
+        })
     }
 
     /// Computes the ordered list of env file paths to load
-    fn resolve_env_paths(&self, dir: &str) -> Vec<String> {
-        self.inner
-            .resolve_env_paths(Path::new(dir))
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect()
+    fn resolve_env_paths<'py>(&self, py: Python<'py>, dir: String) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        future_into_py(py, async move {
+            let paths = inner
+                .resolve_env_paths(Path::new(&dir))
+                .await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
+            Ok(paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect::<Vec<String>>())
+        })
     }
 
     /// Gets all environment variables as a dict (decrypted)
     /// Note: This loads variables into the process environment first
-    fn get_all_variables(&self) -> PyResult<HashMap<String, String>> {
-        // First load into environment (ignore returned paths)
-        let _ = self
-            .inner
-            .load()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
+    fn get_all_variables<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        future_into_py(py, async move {
+            // First load into environment (ignore returned paths)
+            let _ = inner
+                .load()
+                .await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
 
-        let names = self
-            .inner
-            .get_all_variable_names()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
+            let names = inner
+                .get_all_variable_names()
+                .await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
 
-        // Collect variables into a HashMap
-        let mut vars: HashMap<String, String> = HashMap::new();
-        for name in names {
-            if let Ok(value) = std::env::var(&name) {
-                vars.insert(name, value);
+            // Collect variables into a HashMap
+            let mut vars: HashMap<String, String> = HashMap::new();
+            for name in names {
+                if let Ok(value) = std::env::var(&name) {
+                    vars.insert(name, value);
+                }
             }
-        }
 
-        Ok(vars)
+            Ok(vars)
+        })
     }
 
     /// Gets all environment variables from a specific directory as a dict
     /// (decrypted). Note: This loads variables into the process environment
     /// first
-    fn get_all_variables_from_dir(&self, dir: &str) -> PyResult<HashMap<String, String>> {
-        // First load into environment (ignore returned paths)
-        let _ = self
-            .inner
-            .load_from_dir(Path::new(dir))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
+    fn get_all_variables_from_dir<'py>(
+        &self,
+        py: Python<'py>,
+        dir: String,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        future_into_py(py, async move {
+            // First load into environment (ignore returned paths)
+            let _ = inner
+                .load_from_dir(Path::new(&dir))
+                .await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
 
-        let names = self
-            .inner
-            .get_all_variable_names_from_dir(Path::new(dir))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
+            let names = inner
+                .get_all_variable_names_from_dir(Path::new(&dir))
+                .await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?;
 
-        // Collect variables into a HashMap
-        let mut vars: HashMap<String, String> = HashMap::new();
-        for name in names {
-            if let Ok(value) = std::env::var(&name) {
-                vars.insert(name, value);
+            // Collect variables into a HashMap
+            let mut vars: HashMap<String, String> = HashMap::new();
+            for name in names {
+                if let Ok(value) = std::env::var(&name) {
+                    vars.insert(name, value);
+                }
             }
-        }
 
-        Ok(vars)
+            Ok(vars)
+        })
     }
 }
 

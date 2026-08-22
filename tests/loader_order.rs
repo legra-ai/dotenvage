@@ -4,6 +4,9 @@ use std::env;
 
 use serial_test::serial;
 
+mod common;
+use common::write;
+
 fn names(paths: Vec<std::path::PathBuf>) -> Vec<String> {
     paths
         .into_iter()
@@ -47,9 +50,9 @@ const CLEAR_ALL_DIMENSION_VARS: &[&str] = &[
     "PR_NUMBER",
 ];
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_no_env_uses_local() {
+async fn order_no_env_uses_local() {
     clear_env(&[
         "DOTENVAGE_ENV",
         "EKG_ENV",
@@ -63,18 +66,20 @@ fn order_no_env_uses_local() {
         "USER",
         "USERNAME",
     ]);
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.local"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.local"), "").await.unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = loader.resolve_env_paths(tmp.path());
+    let got = loader.resolve_env_paths(tmp.path()).await.unwrap();
     let got = names(got);
     assert_eq!(got, vec![".env", ".env.local"]);
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_env_prod() {
+async fn order_env_prod() {
     clear_env(&[
         "DOTENVAGE_ENV",
         "EKG_ENV",
@@ -91,17 +96,19 @@ fn order_env_prod() {
     unsafe {
         env::set_var("DOTENVAGE_ENV", "prod");
     }
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.prod"), "").await.unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     assert_eq!(got, vec![".env", ".env.prod"]);
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_env_arch() {
+async fn order_env_arch() {
     clear_env(&[
         "DOTENVAGE_ENV",
         "EKG_ENV",
@@ -121,18 +128,22 @@ fn order_env_arch() {
     unsafe {
         env::set_var("DOTENVAGE_ARCH", "docker-s3");
     }
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod.docker-s3"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.prod"), "").await.unwrap();
+    write(tmp.path().join(".env.prod.docker-s3"), "")
+        .await
+        .unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     assert_eq!(got, vec![".env", ".env.prod", ".env.prod.docker-s3"]);
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_user_and_arch() {
+async fn order_user_and_arch() {
     clear_env(&[
         "DOTENVAGE_ENV",
         "EKG_ENV",
@@ -155,15 +166,21 @@ fn order_user_and_arch() {
     unsafe {
         env::set_var("DOTENVAGE_USER", "alice");
     }
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod.docker-s3"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.alice"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod.alice"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod.docker-s3.alice"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.prod"), "").await.unwrap();
+    write(tmp.path().join(".env.prod.docker-s3"), "")
+        .await
+        .unwrap();
+    write(tmp.path().join(".env.alice"), "").await.unwrap();
+    write(tmp.path().join(".env.prod.alice"), "").await.unwrap();
+    write(tmp.path().join(".env.prod.docker-s3.alice"), "")
+        .await
+        .unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     assert_eq!(
         got,
         vec![
@@ -177,9 +194,9 @@ fn order_user_and_arch() {
     );
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_user_without_env() {
+async fn order_user_without_env() {
     clear_env(&[
         "DOTENVAGE_ENV",
         "EKG_ENV",
@@ -196,22 +213,24 @@ fn order_user_without_env() {
     unsafe {
         env::set_var("DOTENVAGE_USER", "bob");
     }
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.local"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.bob"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.local.bob"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.local"), "").await.unwrap();
+    write(tmp.path().join(".env.bob"), "").await.unwrap();
+    write(tmp.path().join(".env.local.bob"), "").await.unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     assert_eq!(
         got,
         vec![".env", ".env.local", ".env.bob", ".env.local.bob"]
     );
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_cargo_target_arch() {
+async fn order_cargo_target_arch() {
     clear_env(&[
         "DOTENVAGE_ENV",
         "EKG_ENV",
@@ -230,18 +249,22 @@ fn order_cargo_target_arch() {
     unsafe {
         env::set_var("CARGO_CFG_TARGET_ARCH", "aarch64");
     }
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.local"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.local.arm64"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.local"), "").await.unwrap();
+    write(tmp.path().join(".env.local.arm64"), "")
+        .await
+        .unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     assert_eq!(got, vec![".env", ".env.local", ".env.local.arm64"]);
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_target_triple() {
+async fn order_target_triple() {
     clear_env(&[
         "DOTENVAGE_ENV",
         "EKG_ENV",
@@ -260,18 +283,22 @@ fn order_target_triple() {
     unsafe {
         env::set_var("TARGET", "x86_64-unknown-linux-gnu");
     }
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.local"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.local.amd64"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.local"), "").await.unwrap();
+    write(tmp.path().join(".env.local.amd64"), "")
+        .await
+        .unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     assert_eq!(got, vec![".env", ".env.local", ".env.local.amd64"]);
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_github_pr_number() {
+async fn order_github_pr_number() {
     clear_env(&[
         "DOTENVAGE_ENV",
         "EKG_ENV",
@@ -291,17 +318,19 @@ fn order_github_pr_number() {
     unsafe {
         env::set_var("PR_NUMBER", "123");
     }
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.pr-123"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.pr-123"), "").await.unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     assert_eq!(got, vec![".env", ".env.pr-123"]);
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_github_ref_parsing() {
+async fn order_github_ref_parsing() {
     clear_env(&[
         "DOTENVAGE_ENV",
         "EKG_ENV",
@@ -318,17 +347,19 @@ fn order_github_ref_parsing() {
     unsafe {
         env::set_var("GITHUB_REF", "refs/pull/456/merge");
     }
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.pr-456"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.pr-456"), "").await.unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     assert_eq!(got, vec![".env", ".env.pr-456"]);
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn case_insensitive_and_separators() {
+async fn case_insensitive_and_separators() {
     clear_env(&[
         "DOTENVAGE_ENV",
         "EKG_ENV",
@@ -351,18 +382,22 @@ fn case_insensitive_and_separators() {
     unsafe {
         env::set_var("DOTENVAGE_USER", "AlIcE");
     }
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".ENV"), "").unwrap();
-    std::fs::write(tmp.path().join(".ENV.PROD"), "").unwrap();
-    std::fs::write(tmp.path().join(".ENV.PROD.DOCKER-S3.ALICE"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".ENV"), "").await.unwrap();
+    write(tmp.path().join(".ENV.PROD"), "").await.unwrap();
+    write(tmp.path().join(".ENV.PROD.DOCKER-S3.ALICE"), "")
+        .await
+        .unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     assert_eq!(got, vec![".ENV", ".ENV.PROD", ".ENV.PROD.DOCKER-S3.ALICE"]);
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_variant_basic() {
+async fn order_variant_basic() {
     clear_env(CLEAR_ALL_DIMENSION_VARS);
     unsafe {
         env::set_var("DOTENVAGE_ENV", "prod");
@@ -370,22 +405,26 @@ fn order_variant_basic() {
     unsafe {
         env::set_var("DOTENVAGE_VARIANT", "docker");
     }
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.docker"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod.docker"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.prod"), "").await.unwrap();
+    write(tmp.path().join(".env.docker"), "").await.unwrap();
+    write(tmp.path().join(".env.prod.docker"), "")
+        .await
+        .unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     assert_eq!(
         got,
         vec![".env", ".env.prod", ".env.docker", ".env.prod.docker"]
     );
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_all_five_dimensions() {
+async fn order_all_five_dimensions() {
     clear_env(CLEAR_ALL_DIMENSION_VARS);
     unsafe {
         env::set_var("DOTENVAGE_ENV", "prod");
@@ -399,21 +438,27 @@ fn order_all_five_dimensions() {
     unsafe {
         env::set_var("DOTENVAGE_VARIANT", "k8s");
     }
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
     // Create files for a subset of combinations
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.arm64"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.alice"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.k8s"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod.arm64"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod.alice"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod.k8s"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.arm64.alice"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.alice.k8s"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.prod.arm64.alice.k8s"), "").unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.prod"), "").await.unwrap();
+    write(tmp.path().join(".env.arm64"), "").await.unwrap();
+    write(tmp.path().join(".env.alice"), "").await.unwrap();
+    write(tmp.path().join(".env.k8s"), "").await.unwrap();
+    write(tmp.path().join(".env.prod.arm64"), "").await.unwrap();
+    write(tmp.path().join(".env.prod.alice"), "").await.unwrap();
+    write(tmp.path().join(".env.prod.k8s"), "").await.unwrap();
+    write(tmp.path().join(".env.arm64.alice"), "")
+        .await
+        .unwrap();
+    write(tmp.path().join(".env.alice.k8s"), "").await.unwrap();
+    write(tmp.path().join(".env.prod.arm64.alice.k8s"), "")
+        .await
+        .unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     // Verify specificity ordering based on bitmask iteration
     // Bitmask: bit0=ENV, bit1=OS, bit2=ARCH, bit3=USER, bit4=VARIANT
     // Files are ordered by mask value (which naturally groups by part count)
@@ -435,20 +480,24 @@ fn order_all_five_dimensions() {
     );
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn order_variant_with_ekg_prefix() {
+async fn order_variant_with_ekg_prefix() {
     clear_env(CLEAR_ALL_DIMENSION_VARS);
     unsafe {
         env::set_var("EKG_VARIANT", "canary");
     }
-    let tmp = tempfile::tempdir().unwrap();
-    std::fs::write(tmp.path().join(".env"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.local"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.canary"), "").unwrap();
-    std::fs::write(tmp.path().join(".env.local.canary"), "").unwrap();
+    let tmp = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
+    write(tmp.path().join(".env"), "").await.unwrap();
+    write(tmp.path().join(".env.local"), "").await.unwrap();
+    write(tmp.path().join(".env.canary"), "").await.unwrap();
+    write(tmp.path().join(".env.local.canary"), "")
+        .await
+        .unwrap();
     let loader = dotenvage::EnvLoader::with_manager(dotenvage::SecretManager::generate().unwrap());
-    let got = names(loader.resolve_env_paths(tmp.path()));
+    let got = names(loader.resolve_env_paths(tmp.path()).await.unwrap());
     assert_eq!(
         got,
         vec![".env", ".env.local", ".env.canary", ".env.local.canary"]

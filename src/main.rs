@@ -7,7 +7,6 @@
 //! variables.
 
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{
     Path,
     PathBuf,
@@ -16,6 +15,12 @@ use std::path::{
 use anyhow::{
     Context,
     Result,
+};
+use async_fs_io::{
+    TempFile,
+    read_string_bounded,
+    try_exists,
+    write_bytes,
 };
 use clap::{
     Parser,
@@ -158,41 +163,43 @@ fn parse_env_file(content: &str) -> Result<HashMap<String, String>> {
         .context("Failed to parse .env file")
 }
 
-fn write_env_file(path: &Path, vars: &HashMap<String, String>) -> Result<()> {
-    let mut file = std::fs::File::create(path)
-        .with_context(|| format!("Failed to create {}", path.display()))?;
+async fn write_env_file(path: &Path, vars: &HashMap<String, String>) -> Result<()> {
     let mut keys: Vec<_> = vars.keys().collect();
     keys.sort();
+    let mut output = String::new();
     for key in keys {
         let value = vars.get(key).unwrap();
         if value.contains(' ') || value.contains('$') || value.contains('\n') {
-            writeln!(file, "{}=\"{}\"", key, value.replace('"', "\\\""))?;
+            output.push_str(&format!("{}=\"{}\"\n", key, value.replace('"', "\\\"")));
         } else {
-            writeln!(file, "{}={}", key, value)?;
+            output.push_str(&format!("{}={}\n", key, value));
         }
     }
-    Ok(())
+    write_bytes(path, output.as_bytes())
+        .await
+        .map_err(|error| anyhow::anyhow!("failed to write {}: {}", path.display(), error))
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = <Cli as clap::Parser>::parse();
     match cli.command {
         Commands::Keygen {
             output,
             force,
             store,
-        } => keygen(output, force, store),
-        Commands::Encrypt { file, keys, auto } => encrypt(file, keys, auto),
-        Commands::Edit { file } => edit(file),
-        Commands::Set { pair, file } => set(pair, file),
-        Commands::Unset { key, file } => unset(key, file),
-        Commands::Get { key, file } => get(key, file, cli.verbose),
+        } => keygen(output, force, store).await,
+        Commands::Encrypt { file, keys, auto } => encrypt(file, keys, auto).await,
+        Commands::Edit { file } => edit(file).await,
+        Commands::Set { pair, file } => set(pair, file).await,
+        Commands::Unset { key, file } => unset(key, file).await,
+        Commands::Get { key, file } => get(key, file, cli.verbose).await,
         Commands::List {
             file,
             show_values,
             plain,
             json,
-        } => list(file, show_values, plain, json, cli.verbose),
+        } => list(file, show_values, plain, json, cli.verbose).await,
         Commands::Dump {
             file,
             bash,
@@ -208,12 +215,12 @@ fn main() -> Result<()> {
                 export,
                 docker,
             };
-            dump(file, options, cli.verbose)
+            dump(file, options, cli.verbose).await
         }
     }
 }
 
-fn keygen(output: Option<PathBuf>, force: bool, store: KeyStore) -> Result<()> {
+async fn keygen(output: Option<PathBuf>, force: bool, store: KeyStore) -> Result<()> {
     use dotenvage::{
         KeyGenOptions,
         KeyLocation,
@@ -237,6 +244,7 @@ fn keygen(output: Option<PathBuf>, force: bool, store: KeyStore) -> Result<()> {
         file_path: output,
         force,
     })
+    .await
     .context("Failed to generate and save key")?;
 
     for loc in &result.locations {
@@ -268,12 +276,15 @@ fn keygen(output: Option<PathBuf>, force: bool, store: KeyStore) -> Result<()> {
     Ok(())
 }
 
-fn encrypt(file: PathBuf, keys: Option<Vec<String>>, auto: bool) -> Result<()> {
-    let manager = SecretManager::new().context("Failed to load encryption key")?;
-    if !file.exists() {
+async fn encrypt(file: PathBuf, keys: Option<Vec<String>>, auto: bool) -> Result<()> {
+    let manager = SecretManager::new()
+        .await
+        .context("Failed to load encryption key")?;
+    if !try_exists(&file).await? {
         anyhow::bail!("File not found: {}", file.display());
     }
-    let content = std::fs::read_to_string(&file)
+    let content = read_string_bounded(&file, 16 * 1024 * 1024)
+        .await
         .with_context(|| format!("Failed to read {}", file.display()))?;
     let mut vars = parse_env_file(&content)?;
     let mut encrypted_count = 0;
@@ -302,7 +313,7 @@ fn encrypt(file: PathBuf, keys: Option<Vec<String>>, auto: bool) -> Result<()> {
             encrypted_count += 1;
         }
     }
-    write_env_file(&file, &vars)?;
+    write_env_file(&file, &vars).await?;
     println!(
         "✓ Encrypted {} value(s) in {}",
         encrypted_count,
@@ -324,12 +335,15 @@ fn encrypt(file: PathBuf, keys: Option<Vec<String>>, auto: bool) -> Result<()> {
 
 /// Edit an environment file by decrypting, opening in editor, and re-encrypting
 /// changes.
-fn edit(file: PathBuf) -> Result<()> {
-    let manager = SecretManager::new().context("Failed to load encryption key")?;
-    if !file.exists() {
+async fn edit(file: PathBuf) -> Result<()> {
+    let manager = SecretManager::new()
+        .await
+        .context("Failed to load encryption key")?;
+    if !try_exists(&file).await? {
         anyhow::bail!("File not found: {}", file.display());
     }
-    let content = std::fs::read_to_string(&file)
+    let content = read_string_bounded(&file, 16 * 1024 * 1024)
+        .await
         .with_context(|| format!("Failed to read {}", file.display()))?;
     let mut vars = parse_env_file(&content)?;
     let mut keys_to_encrypt = Vec::new();
@@ -345,12 +359,13 @@ fn edit(file: PathBuf) -> Result<()> {
                 .with_context(|| format!("Failed to decrypt {}", key))?;
         }
     }
-    let temp = tempfile::Builder::new()
-        .suffix(".env")
-        .tempfile()
+    let temp = TempFile::create(std::env::temp_dir())
+        .await
         .context("Failed to create temp file")?;
-    write_env_file(temp.path(), &vars)?;
-    let original = std::fs::read_to_string(temp.path()).context("Failed to read temp file")?;
+    write_env_file(temp.path(), &vars).await?;
+    let original = read_string_bounded(temp.path(), 16 * 1024 * 1024)
+        .await
+        .context("Failed to read temp file")?;
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
     let status = std::process::Command::new(&editor)
         .arg(temp.path())
@@ -359,7 +374,9 @@ fn edit(file: PathBuf) -> Result<()> {
     if !status.success() {
         anyhow::bail!("Editor exited with non-zero status");
     }
-    let edited = std::fs::read_to_string(temp.path()).context("Failed to read edited file")?;
+    let edited = read_string_bounded(temp.path(), 16 * 1024 * 1024)
+        .await
+        .context("Failed to read edited file")?;
     if edited == original {
         println!("No changes made.");
         return Ok(());
@@ -379,20 +396,24 @@ fn edit(file: PathBuf) -> Result<()> {
                 .with_context(|| format!("Failed to encrypt {}", key))?;
         }
     }
-    write_env_file(&file, &edited_vars)?;
+    write_env_file(&file, &edited_vars).await?;
     println!("✓ Saved encrypted changes to {}", file.display());
     Ok(())
 }
 
-fn set(pair: String, file: PathBuf) -> Result<()> {
-    let manager = SecretManager::new().context("Failed to load encryption key")?;
+async fn set(pair: String, file: PathBuf) -> Result<()> {
+    let manager = SecretManager::new()
+        .await
+        .context("Failed to load encryption key")?;
     let (key, value) = pair.split_once('=').context("Invalid KEY=VALUE format")?;
     let loader = dotenvage::EnvLoader::with_manager(manager);
     loader
         .set_var_in_file(key, value, &file)
+        .await
         .with_context(|| format!("Failed to write {}", file.display()))?;
 
-    let final_value = std::fs::read_to_string(&file)
+    let final_value = read_string_bounded(&file, 16 * 1024 * 1024)
+        .await
         .with_context(|| format!("Failed to read {}", file.display()))
         .and_then(|content| {
             parse_env_file(&content)?
@@ -409,23 +430,29 @@ fn set(pair: String, file: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn unset(key: String, file: PathBuf) -> Result<()> {
-    let manager = SecretManager::new().context("Failed to load encryption key")?;
+async fn unset(key: String, file: PathBuf) -> Result<()> {
+    let manager = SecretManager::new()
+        .await
+        .context("Failed to load encryption key")?;
     let loader = dotenvage::EnvLoader::with_manager(manager);
     loader
         .unset_var_in_file(&key, &file)
+        .await
         .with_context(|| format!("Failed to write {}", file.display()))?;
     println!("✓ Unset {} in {}", key, file.display());
     Ok(())
 }
 
-fn get(key: String, file: Option<PathBuf>, verbose_files: bool) -> Result<()> {
-    let manager = SecretManager::new().context("Failed to load encryption key")?;
+async fn get(key: String, file: Option<PathBuf>, verbose_files: bool) -> Result<()> {
+    let manager = SecretManager::new()
+        .await
+        .context("Failed to load encryption key")?;
     let value = if let Some(file_path) = file {
         if verbose_files {
             eprintln!("Reading: {}", file_path.display());
         }
-        let content = std::fs::read_to_string(&file_path)
+        let content = read_string_bounded(&file_path, 16 * 1024 * 1024)
+            .await
             .with_context(|| format!("Failed to read {}", file_path.display()))?;
         let vars = parse_env_file(&content)?;
         vars.get(&key)
@@ -436,6 +463,7 @@ fn get(key: String, file: Option<PathBuf>, verbose_files: bool) -> Result<()> {
         let loader = dotenvage::EnvLoader::with_manager(manager.clone());
         let (vars, paths) = loader
             .collect_all_vars_from_dir(Path::new("."))
+            .await
             .context("Failed to collect environment variables")?;
         if verbose_files {
             for p in &paths {
@@ -453,25 +481,28 @@ fn get(key: String, file: Option<PathBuf>, verbose_files: bool) -> Result<()> {
     Ok(())
 }
 
-fn list(
+async fn list(
     file: Option<PathBuf>,
     show_values: bool,
     plain: bool,
     json: bool,
     verbose_files: bool,
 ) -> Result<()> {
-    let manager = SecretManager::new().context("Failed to load encryption key")?;
+    let manager = SecretManager::new()
+        .await
+        .context("Failed to load encryption key")?;
 
     // Collect variables from either a specific file or all .env* files
     let vars = if let Some(file_path) = file {
         // Single file mode
-        if !file_path.exists() {
+        if !try_exists(&file_path).await? {
             anyhow::bail!("File not found: {}", file_path.display());
         }
         if verbose_files {
             eprintln!("Reading: {}", file_path.display());
         }
-        let content = std::fs::read_to_string(&file_path)
+        let content = read_string_bounded(&file_path, 16 * 1024 * 1024)
+            .await
             .with_context(|| format!("Failed to read {}", file_path.display()))?;
         parse_env_file(&content)?
     } else {
@@ -479,6 +510,7 @@ fn list(
         let loader = dotenvage::EnvLoader::with_manager(manager.clone());
         let (all_vars, paths) = loader
             .collect_all_vars_from_dir(Path::new("."))
+            .await
             .context("Failed to collect environment variables")?;
         if verbose_files {
             for path in &paths {
@@ -577,18 +609,21 @@ fn print_list_entry(
     Ok(())
 }
 
-fn dump(file: Option<PathBuf>, options: DumpOptions, verbose_files: bool) -> Result<()> {
-    let manager = SecretManager::new().context("Failed to load encryption key")?;
+async fn dump(file: Option<PathBuf>, options: DumpOptions, verbose_files: bool) -> Result<()> {
+    let manager = SecretManager::new()
+        .await
+        .context("Failed to load encryption key")?;
 
     if let Some(file_path) = file {
         // Dump specific file only (no comments, just vars)
-        if !file_path.exists() {
+        if !try_exists(&file_path).await? {
             anyhow::bail!("File not found: {}", file_path.display());
         }
         if verbose_files {
             eprintln!("Reading: {}", file_path.display());
         }
-        let content = std::fs::read_to_string(&file_path)
+        let content = read_string_bounded(&file_path, 16 * 1024 * 1024)
+            .await
             .with_context(|| format!("Failed to read {}", file_path.display()))?;
         let all_vars = parse_env_file(&content)?;
         dump_vars(&manager, &all_vars, options)?;
@@ -598,6 +633,7 @@ fn dump(file: Option<PathBuf>, options: DumpOptions, verbose_files: bool) -> Res
         let loader = dotenvage::EnvLoader::with_manager(manager.clone());
         let (merged_vars, paths) = loader
             .collect_all_vars_from_dir(Path::new("."))
+            .await
             .context("Failed to collect environment variables")?;
         if verbose_files {
             for path in &paths {

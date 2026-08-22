@@ -182,16 +182,23 @@ source <(dotenvage dump --export)
 ```rust,no_run
 use dotenvage::{SecretManager, EnvLoader};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load env files with auto-decryption
-    EnvLoader::new()?.load()?;
+    EnvLoader::new().await?.load().await?;
 
     // Write/update a variable via the library API (auto-encrypts sensitive keys)
-    let loader = EnvLoader::new()?;
-    loader.set_var_in_file("WWKG_PASSPHRASE", "super-secret", ".env.local")?;
+    let loader = EnvLoader::new().await?;
+    loader
+        .set_var_in_file("WWKG_PASSPHRASE", "super-secret", ".env.local")
+        .await?;
 
     // Get all variable names (functional style)
-    let vars = EnvLoader::new()?.get_all_variable_names()?.join(", ");
+    let vars = EnvLoader::new()
+        .await?
+        .get_all_variable_names()
+        .await?
+        .join(", ");
 
     // Encrypt and decrypt values
     let manager = SecretManager::generate()?;
@@ -205,12 +212,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         key_name: Some("myproject/myapp".into()),
         file_path: None,
         force: false,
-    })?;
+    })
+    .await?;
     println!("Public key: {}", result.public_key);
 
     // Check if key exists in system store
-    if SecretManager::key_exists_in_system_store() {
-        let mgr = SecretManager::load_from_system_store()?;
+    if SecretManager::key_exists_in_system_store().await {
+        let mgr = SecretManager::load_from_system_store().await?;
         // daemon can now decrypt secrets
     }
 

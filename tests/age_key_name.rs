@@ -1,11 +1,15 @@
 //! Tests for AGE_KEY_NAME feature - project-specific key discovery
 
-use std::{
-    env,
-    fs,
-};
+use std::env;
 
 use serial_test::serial;
+
+mod common;
+use common::{
+    ensure_dir,
+    read,
+    write,
+};
 
 fn clear_key_env() {
     unsafe {
@@ -16,20 +20,22 @@ fn clear_key_env() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn age_key_name_from_env() {
+async fn age_key_name_from_env() {
     clear_key_env();
 
-    let tmpdir = tempfile::tempdir().unwrap();
+    let tmpdir = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
     let state_dir = tmpdir.path().join("state");
     let key_dir = state_dir.join("myproject").join("myapp");
-    fs::create_dir_all(&key_dir).unwrap();
+    ensure_dir(&key_dir).await.unwrap();
 
     // Generate a key and save it
     let manager = dotenvage::SecretManager::generate().unwrap();
     let key_path = key_dir.join("test.key");
-    manager.save_key(&key_path).unwrap();
+    manager.save_key(&key_path).await.unwrap();
 
     // Set up environment
     unsafe {
@@ -38,7 +44,7 @@ fn age_key_name_from_env() {
     }
 
     // Load key should find it via AGE_KEY_NAME
-    let loaded_manager = dotenvage::SecretManager::load_key().unwrap();
+    let loaded_manager = dotenvage::SecretManager::load_key().await.unwrap();
 
     // Verify it's the same key by encrypting/decrypting
     let plaintext = "test-secret-123";
@@ -54,12 +60,14 @@ fn age_key_name_from_env() {
     );
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn age_key_name_default_to_cargo_pkg_name() {
+async fn age_key_name_default_to_cargo_pkg_name() {
     clear_key_env();
 
-    let tmpdir = tempfile::tempdir().unwrap();
+    let tmpdir = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
     let state_dir = tmpdir.path().join("state");
 
     unsafe {
@@ -72,28 +80,31 @@ fn age_key_name_default_to_cargo_pkg_name() {
     assert_eq!(path, expected);
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn age_key_name_with_env_loader() {
+async fn age_key_name_with_env_loader() {
     clear_key_env();
 
-    let tmpdir = tempfile::tempdir().unwrap();
+    let tmpdir = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
     let state_dir = tmpdir.path().join("state");
     let key_dir = state_dir.join("testapp");
-    fs::create_dir_all(&key_dir).unwrap();
+    ensure_dir(&key_dir).await.unwrap();
 
     // Generate a key and save it
     let manager = dotenvage::SecretManager::generate().unwrap();
     let key_path = key_dir.join("dotenvage.key");
-    manager.save_key(&key_path).unwrap();
+    manager.save_key(&key_path).await.unwrap();
 
     // Create .env with AGE_KEY_NAME and encrypted secret
     let env_file = tmpdir.path().join(".env");
     let encrypted_value = manager.encrypt_value("supersecret").unwrap();
-    fs::write(
+    write(
         &env_file,
         format!("AGE_KEY_NAME=testapp\nAPI_KEY={}", encrypted_value),
     )
+    .await
     .unwrap();
 
     // Set up environment
@@ -103,18 +114,20 @@ fn age_key_name_with_env_loader() {
 
     // Load environment - should auto-discover key via AGE_KEY_NAME from .env
     let loader = dotenvage::EnvLoader::with_manager(manager);
-    let vars = loader.load_env_file(&env_file).unwrap();
+    let vars = loader.load_env_file(&env_file).await.unwrap();
 
     assert_eq!(vars.get("AGE_KEY_NAME"), Some(&"testapp".to_string()));
     assert_eq!(vars.get("API_KEY"), Some(&"supersecret".to_string()));
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn age_key_name_priority_order() {
+async fn age_key_name_priority_order() {
     clear_key_env();
 
-    let tmpdir = tempfile::tempdir().unwrap();
+    let tmpdir = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
     let state_dir = tmpdir.path().join("state");
 
     // Generate two different keys
@@ -122,19 +135,19 @@ fn age_key_name_priority_order() {
     let manager2 = dotenvage::SecretManager::generate().unwrap();
 
     let key1_dir = state_dir.join("project1");
-    fs::create_dir_all(&key1_dir).unwrap();
+    ensure_dir(&key1_dir).await.unwrap();
     let key1_path = key1_dir.join("dotenvage.key");
-    manager1.save_key(&key1_path).unwrap();
+    manager1.save_key(&key1_path).await.unwrap();
 
     // Priority 1: AGE_KEY env var should win
-    let key1_content = fs::read_to_string(&key1_path).unwrap();
+    let key1_content = read(&key1_path).await.unwrap();
     unsafe {
         env::set_var("AGE_KEY", key1_content.trim());
         env::set_var("AGE_KEY_NAME", "project2"); // Should be ignored
         env::set_var("XDG_STATE_HOME", state_dir.to_str().unwrap());
     }
 
-    let loaded = dotenvage::SecretManager::load_key().unwrap();
+    let loaded = dotenvage::SecretManager::load_key().await.unwrap();
     let plaintext = "test-123";
     let encrypted = manager1.encrypt_value(plaintext).unwrap();
     let decrypted = loaded.decrypt_value(&encrypted).unwrap();
@@ -152,12 +165,14 @@ fn age_key_name_priority_order() {
     );
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn age_key_name_empty_string_uses_default() {
+async fn age_key_name_empty_string_uses_default() {
     clear_key_env();
 
-    let tmpdir = tempfile::tempdir().unwrap();
+    let tmpdir = async_fs_io::TempDir::create(std::env::temp_dir())
+        .await
+        .unwrap();
     let state_dir = tmpdir.path().join("state");
 
     unsafe {

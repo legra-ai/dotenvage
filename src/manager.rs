@@ -19,6 +19,12 @@ use std::path::{
 
 use age::secrecy::ExposeSecret;
 use age::x25519;
+use async_fs_io::{
+    ensure_dir,
+    read_string_bounded_if_exists,
+    set_permissions,
+    write_bytes,
+};
 use base64::Engine as _;
 
 use crate::error::{
@@ -119,7 +125,8 @@ impl std::fmt::Debug for KeyGenResult {
 /// ```rust
 /// use dotenvage::SecretManager;
 ///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Generate a new key
 /// let manager = SecretManager::generate()?;
 ///
@@ -138,15 +145,6 @@ pub struct SecretManager {
     identity: x25519::Identity,
 }
 
-trait KeyBackend {
-    fn load_identity_string(&self) -> SecretsResult<Option<String>>;
-    fn save_identity_string(&self, _identity: &str) -> SecretsResult<()> {
-        Err(SecretsError::KeySaveFailed(
-            "save operation not implemented for this backend".to_string(),
-        ))
-    }
-}
-
 struct FileKeyBackend {
     path: PathBuf,
 }
@@ -157,41 +155,36 @@ impl FileKeyBackend {
     }
 }
 
-impl KeyBackend for FileKeyBackend {
-    fn load_identity_string(&self) -> SecretsResult<Option<String>> {
-        if !self.path.exists() {
-            return Ok(None);
-        }
-
-        let key_data = std::fs::read_to_string(&self.path).map_err(|e| {
-            SecretsError::KeyLoadFailed(format!("read {}: {}", self.path.display(), e))
-        })?;
-        Ok(Some(key_data))
+impl FileKeyBackend {
+    async fn load_identity_string(&self) -> SecretsResult<Option<String>> {
+        read_string_bounded_if_exists(&self.path, 1024 * 1024)
+            .await
+            .map_err(|e| {
+                SecretsError::KeyLoadFailed(format!("read {}: {}", self.path.display(), e))
+            })
     }
 
-    fn save_identity_string(&self, identity: &str) -> SecretsResult<()> {
+    async fn save_identity_string(&self, identity: &str) -> SecretsResult<()> {
         if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
+            ensure_dir(parent).await.map_err(|e| {
                 SecretsError::KeySaveFailed(format!("create dir {}: {}", parent.display(), e))
             })?;
         }
 
-        std::fs::write(&self.path, identity.as_bytes()).map_err(|e| {
-            SecretsError::KeySaveFailed(format!("write {}: {}", self.path.display(), e))
-        })?;
+        write_bytes(&self.path, identity.as_bytes())
+            .await
+            .map_err(|e| {
+                SecretsError::KeySaveFailed(format!("write {}: {}", self.path.display(), e))
+            })?;
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&self.path)
+            set_permissions(&self.path, std::fs::Permissions::from_mode(0o600))
+                .await
                 .map_err(|e| {
-                    SecretsError::KeySaveFailed(format!("metadata {}: {}", self.path.display(), e))
-                })?
-                .permissions();
-            perms.set_mode(0o600);
-            std::fs::set_permissions(&self.path, perms).map_err(|e| {
-                SecretsError::KeySaveFailed(format!("chmod {}: {}", self.path.display(), e))
-            })?;
+                    SecretsError::KeySaveFailed(format!("chmod {}: {}", self.path.display(), e))
+                })?;
         }
 
         Ok(())
@@ -209,7 +202,7 @@ impl OsKeychainBackend {
     }
 }
 
-impl KeyBackend for OsKeychainBackend {
+impl OsKeychainBackend {
     fn load_identity_string(&self) -> SecretsResult<Option<String>> {
         load_from_os_keychain(&self.service, &self.account)
     }
@@ -340,13 +333,13 @@ impl SystemStoreBackend {
     }
 }
 
-impl KeyBackend for SystemStoreBackend {
-    fn load_identity_string(&self) -> SecretsResult<Option<String>> {
-        load_from_system_store_impl(&self.key_name)
+impl SystemStoreBackend {
+    async fn load_identity_string(&self) -> SecretsResult<Option<String>> {
+        load_from_system_store_impl(&self.key_name).await
     }
 
-    fn save_identity_string(&self, identity: &str) -> SecretsResult<()> {
-        save_to_system_store_impl(&self.key_name, identity)
+    async fn save_identity_string(&self, identity: &str) -> SecretsResult<()> {
+        save_to_system_store_impl(&self.key_name, identity).await
     }
 }
 
@@ -386,7 +379,7 @@ fn system_store_path_for(_key_name: &str) -> PathBuf {
     }
 }
 
-fn load_from_system_store_impl(key_name: &str) -> SecretsResult<Option<String>> {
+async fn load_from_system_store_impl(key_name: &str) -> SecretsResult<Option<String>> {
     // Try the System Keychain first on macOS (interactive users).
     #[cfg(target_os = "macos")]
     if let Some(data) = load_from_macos_system_keychain(key_name)? {
@@ -397,15 +390,13 @@ fn load_from_system_store_impl(key_name: &str) -> SecretsResult<Option<String>> 
     // On macOS this serves daemon processes that cannot access the
     // System Keychain due to ACL restrictions.
     let path = system_store_path_for(key_name);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let data = std::fs::read_to_string(&path)
+    let data = read_string_bounded_if_exists(&path, 1024 * 1024)
+        .await
         .map_err(|e| SecretsError::KeyLoadFailed(format!("read {}: {}", path.display(), e)))?;
-    Ok(normalize_key_data(&data))
+    Ok(data.as_deref().and_then(normalize_key_data))
 }
 
-fn save_to_system_store_impl(key_name: &str, identity: &str) -> SecretsResult<()> {
+async fn save_to_system_store_impl(key_name: &str, identity: &str) -> SecretsResult<()> {
     #[cfg(target_os = "macos")]
     {
         save_to_macos_system_keychain(key_name, identity)
@@ -415,8 +406,8 @@ fn save_to_system_store_impl(key_name: &str, identity: &str) -> SecretsResult<()
     {
         let path = system_store_path_for(key_name);
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                if e.kind() == std::io::ErrorKind::PermissionDenied {
+            ensure_dir(parent).await.map_err(|e| {
+                if e.to_string().contains("permission denied") {
                     return SecretsError::InsufficientPrivileges(format!(
                         "cannot create {}: {} (try with sudo/admin)",
                         parent.display(),
@@ -426,8 +417,8 @@ fn save_to_system_store_impl(key_name: &str, identity: &str) -> SecretsResult<()
                 SecretsError::KeySaveFailed(format!("create dir {}: {}", parent.display(), e))
             })?;
         }
-        std::fs::write(&path, identity.as_bytes()).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::PermissionDenied {
+        write_bytes(&path, identity.as_bytes()).await.map_err(|e| {
+            if e.to_string().contains("permission denied") {
                 return SecretsError::InsufficientPrivileges(format!(
                     "cannot write {}: {} (try with sudo/admin)",
                     path.display(),
@@ -440,15 +431,11 @@ fn save_to_system_store_impl(key_name: &str, identity: &str) -> SecretsResult<()
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&path)
+            set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                .await
                 .map_err(|e| {
-                    SecretsError::KeySaveFailed(format!("metadata {}: {}", path.display(), e))
-                })?
-                .permissions();
-            perms.set_mode(0o600);
-            std::fs::set_permissions(&path, perms).map_err(|e| {
-                SecretsError::KeySaveFailed(format!("chmod {}: {}", path.display(), e))
-            })?;
+                    SecretsError::KeySaveFailed(format!("chmod {}: {}", path.display(), e))
+                })?;
         }
 
         Ok(())
@@ -571,13 +558,14 @@ impl SecretManager {
     /// ```rust,no_run
     /// use dotenvage::SecretManager;
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let manager = SecretManager::new()?;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let manager = SecretManager::new().await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new() -> SecretsResult<Self> {
-        Self::load_key()
+    pub async fn new() -> SecretsResult<Self> {
+        Self::load_key().await
     }
 
     /// Generates a new random identity.
@@ -801,15 +789,16 @@ impl SecretManager {
     /// ```rust,no_run
     /// use dotenvage::SecretManager;
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let manager = SecretManager::generate()?;
-    /// manager.save_key("my-key.txt")?;
+    /// manager.save_key("my-key.txt").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn save_key(&self, path: impl AsRef<Path>) -> SecretsResult<()> {
+    pub async fn save_key(&self, path: impl AsRef<Path>) -> SecretsResult<()> {
         let backend = FileKeyBackend::new(path.as_ref().to_path_buf());
-        backend.save_identity_string(&self.identity_string())
+        backend.save_identity_string(&self.identity_string()).await
     }
 
     /// Saves the key to the default path and returns that path.
@@ -826,16 +815,17 @@ impl SecretManager {
     /// ```rust,no_run
     /// use dotenvage::SecretManager;
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let manager = SecretManager::generate()?;
-    /// let path = manager.save_key_to_default()?;
+    /// let path = manager.save_key_to_default().await?;
     /// println!("Key saved to: {}", path.display());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn save_key_to_default(&self) -> SecretsResult<PathBuf> {
+    pub async fn save_key_to_default(&self) -> SecretsResult<PathBuf> {
         let p = Self::default_key_path();
-        self.save_key(&p)?;
+        self.save_key(&p).await?;
         Ok(p)
     }
 
@@ -870,9 +860,9 @@ impl SecretManager {
     ///
     /// Returns [`SecretsError::InsufficientPrivileges`] if the process
     /// lacks write access to the system store.
-    pub fn save_key_to_system_store(&self) -> SecretsResult<KeyLocation> {
+    pub async fn save_key_to_system_store(&self) -> SecretsResult<KeyLocation> {
         let key_name = Self::key_name_from_env_or_default();
-        self.save_key_to_system_store_as(&key_name)
+        self.save_key_to_system_store_as(&key_name).await
     }
 
     /// Saves this key to the system-level store with an explicit
@@ -882,9 +872,11 @@ impl SecretManager {
     ///
     /// Returns [`SecretsError::InsufficientPrivileges`] if the process
     /// lacks write access to the system store.
-    pub fn save_key_to_system_store_as(&self, key_name: &str) -> SecretsResult<KeyLocation> {
+    pub async fn save_key_to_system_store_as(&self, key_name: &str) -> SecretsResult<KeyLocation> {
         let backend = SystemStoreBackend::new(key_name.to_string());
-        backend.save_identity_string(&self.identity_string())?;
+        backend
+            .save_identity_string(&self.identity_string())
+            .await?;
 
         #[cfg(target_os = "macos")]
         {
@@ -920,16 +912,20 @@ impl SecretManager {
     ///     SecretManager,
     /// };
     ///
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let result = SecretManager::generate_and_save(KeyGenOptions {
     ///     target: KeyStoreTarget::OsKeychain,
     ///     key_name: Some("ekg/wwkg".into()),
     ///     file_path: None,
     ///     force: false,
-    /// })?;
+    /// })
+    /// .await?;
     /// println!("Public key: {}", result.public_key);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// # }
     /// ```
-    pub fn generate_and_save(options: KeyGenOptions) -> SecretsResult<KeyGenResult> {
+    pub async fn generate_and_save(options: KeyGenOptions) -> SecretsResult<KeyGenResult> {
         // If key_name is provided, set it in the environment so all
         // downstream path resolution uses it.
         if let Some(ref name) = options.key_name {
@@ -937,7 +933,7 @@ impl SecretManager {
                 std::env::set_var("AGE_KEY_NAME", name);
             }
         } else {
-            Self::discover_age_key_name_from_env_files()?;
+            Self::discover_age_key_name_from_env_files().await?;
         }
 
         let manager = Self::generate()?;
@@ -948,13 +944,17 @@ impl SecretManager {
                 let path = options
                     .file_path
                     .unwrap_or_else(Self::key_path_from_env_or_default);
-                if path.exists() && !options.force {
+                if async_fs_io::try_exists(&path)
+                    .await
+                    .map_err(|e| SecretsError::KeyLoadFailed(e.to_string()))?
+                    && !options.force
+                {
                     return Err(SecretsError::KeyAlreadyExists(format!(
                         "key file at {}",
                         path.display()
                     )));
                 }
-                manager.save_key(&path)?;
+                manager.save_key(&path).await?;
                 locations.push(KeyLocation::UserFile(path));
             }
             KeyStoreTarget::OsKeychain => {
@@ -963,7 +963,7 @@ impl SecretManager {
             }
             KeyStoreTarget::SystemStore => {
                 let key_name = Self::key_name_from_env_or_default();
-                let loc = manager.save_key_to_system_store_as(&key_name)?;
+                let loc = manager.save_key_to_system_store_as(&key_name).await?;
                 locations.push(loc);
             }
             KeyStoreTarget::OsKeychainAndFile => {
@@ -972,13 +972,17 @@ impl SecretManager {
                 let path = options
                     .file_path
                     .unwrap_or_else(Self::key_path_from_env_or_default);
-                if path.exists() && !options.force {
+                if async_fs_io::try_exists(&path)
+                    .await
+                    .map_err(|e| SecretsError::KeyLoadFailed(e.to_string()))?
+                    && !options.force
+                {
                     return Err(SecretsError::KeyAlreadyExists(format!(
                         "key file at {}",
                         path.display()
                     )));
                 }
-                manager.save_key(&path)?;
+                manager.save_key(&path).await?;
                 locations.push(KeyLocation::UserFile(path));
             }
         }
@@ -999,11 +1003,11 @@ impl SecretManager {
     /// # Errors
     ///
     /// Returns an error if no key is found in the system store.
-    pub fn load_from_system_store() -> SecretsResult<Self> {
-        Self::discover_age_key_name_from_env_files()?;
+    pub async fn load_from_system_store() -> SecretsResult<Self> {
+        Self::discover_age_key_name_from_env_files().await?;
         let key_name = Self::key_name_from_env_or_default();
         let backend = SystemStoreBackend::new(key_name.clone());
-        match backend.load_identity_string()? {
+        match backend.load_identity_string().await? {
             Some(data) => Self::load_from_string(&data),
             None => Err(SecretsError::KeyLoadFailed(format!(
                 "no key found in system store for '{}'",
@@ -1023,8 +1027,8 @@ impl SecretManager {
     ///
     /// Returns an error if the user's home directory cannot be
     /// resolved or no key file is found.
-    pub fn load_from_user(username: &str) -> SecretsResult<Self> {
-        Self::discover_age_key_name_from_env_files()?;
+    pub async fn load_from_user(username: &str) -> SecretsResult<Self> {
+        Self::discover_age_key_name_from_env_files().await?;
         let key_name = Self::key_name_from_env_or_default();
 
         let home = resolve_user_home(username)?;
@@ -1034,7 +1038,7 @@ impl SecretManager {
             .with_extension("key");
 
         let backend = FileKeyBackend::new(key_path.clone());
-        match backend.load_identity_string()? {
+        match backend.load_identity_string().await? {
             Some(data) => Self::load_from_string(&data),
             None => Err(SecretsError::KeyLoadFailed(format!(
                 "no key file for user '{}' at {}",
@@ -1045,8 +1049,8 @@ impl SecretManager {
     }
 
     /// Checks whether a key exists in the OS user keychain.
-    pub fn key_exists_in_os_keychain() -> bool {
-        let _ = Self::discover_age_key_name_from_env_files();
+    pub async fn key_exists_in_os_keychain() -> bool {
+        let _ = Self::discover_age_key_name_from_env_files().await;
         let key_name = Self::key_name_from_env_or_default();
         let service = Self::keychain_service_name();
         let backend = OsKeychainBackend::new(service, key_name);
@@ -1054,11 +1058,11 @@ impl SecretManager {
     }
 
     /// Checks whether a key exists in the system-level store.
-    pub fn key_exists_in_system_store() -> bool {
-        let _ = Self::discover_age_key_name_from_env_files();
+    pub async fn key_exists_in_system_store() -> bool {
+        let _ = Self::discover_age_key_name_from_env_files().await;
         let key_name = Self::key_name_from_env_or_default();
         let backend = SystemStoreBackend::new(key_name);
-        matches!(backend.load_identity_string(), Ok(Some(_)))
+        matches!(backend.load_identity_string().await, Ok(Some(_)))
     }
 
     /// Deletes the key from the OS user keychain.
@@ -1068,8 +1072,8 @@ impl SecretManager {
     /// Returns an error if the deletion fails. Does not error if
     /// no key exists.
     #[cfg(feature = "os-keychain")]
-    pub fn delete_from_os_keychain() -> SecretsResult<()> {
-        let _ = Self::discover_age_key_name_from_env_files();
+    pub async fn delete_from_os_keychain() -> SecretsResult<()> {
+        let _ = Self::discover_age_key_name_from_env_files().await;
         let key_name = Self::key_name_from_env_or_default();
         let service = Self::keychain_service_name();
         delete_from_os_keychain(&service, &key_name)
@@ -1081,8 +1085,8 @@ impl SecretManager {
     /// - **macOS**: `/Library/Keychains/System.keychain`
     /// - **Linux**: `/etc/dotenvage/<key-name>.key`
     /// - **Windows**: `%ProgramData%\dotenvage\<key-name>.key`
-    pub fn system_store_path() -> PathBuf {
-        let _ = Self::discover_age_key_name_from_env_files();
+    pub async fn system_store_path() -> PathBuf {
+        let _ = Self::discover_age_key_name_from_env_files().await;
         let key_name = Self::key_name_from_env_or_default();
         system_store_path_for(&key_name)
     }
@@ -1111,11 +1115,11 @@ impl SecretManager {
     ///
     /// Returns an error if no key can be found in any of the standard
     /// locations or if the key file/string is invalid.
-    pub fn load_key() -> SecretsResult<Self> {
+    pub async fn load_key() -> SecretsResult<Self> {
         // FIRST: Try to discover AGE_KEY_NAME from .env files before
         // doing anything else. This allows project-specific key
         // discovery from .env configuration.
-        Self::discover_age_key_name_from_env_files()?;
+        Self::discover_age_key_name_from_env_files().await?;
 
         if let Ok(data) = std::env::var("DOTENVAGE_AGE_KEY") {
             return Self::load_from_string(&data);
@@ -1137,14 +1141,14 @@ impl SecretManager {
 
         // Step 5: System-level store
         let system_backend = SystemStoreBackend::new(key_name);
-        if let Some(data) = system_backend.load_identity_string()? {
+        if let Some(data) = system_backend.load_identity_string().await? {
             return Self::load_from_string(&data);
         }
 
         // Step 6-7: File-based key
         let key_path = Self::key_path_from_env_or_default();
         let file_backend = FileKeyBackend::new(key_path.clone());
-        if let Some(data) = file_backend.load_identity_string()? {
+        if let Some(data) = file_backend.load_identity_string().await? {
             return Self::load_from_string(&data);
         }
         Err(SecretsError::KeyLoadFailed(format!(
@@ -1170,12 +1174,12 @@ impl SecretManager {
     /// Returns an error if an AGE key name variable (e.g., `EKG_AGE_KEY_NAME`)
     /// is found but encrypted. AGE key name variables must be plaintext because
     /// they are needed for key discovery, which happens before decryption.
-    pub fn discover_age_key_name_from_env_files() -> SecretsResult<()> {
+    pub async fn discover_age_key_name_from_env_files() -> SecretsResult<()> {
         // Try to read .env.local first, then .env
         let env_files = [".env.local", ".env"];
 
         for env_file in &env_files {
-            let vars = Self::find_dotenvage_vars_in_file(env_file)?;
+            let vars = Self::find_dotenvage_vars_in_file(env_file).await?;
             if let Some(key_name) = vars.age_key_name
                 && std::env::var("AGE_KEY_NAME").is_err()
             {
@@ -1209,13 +1213,14 @@ impl SecretManager {
     ///
     /// Returns an error if an AGE key name variable is found but
     /// encrypted.
-    fn find_dotenvage_vars_in_file(file_path: &str) -> SecretsResult<DotenvageVars> {
+    async fn find_dotenvage_vars_in_file(file_path: &str) -> SecretsResult<DotenvageVars> {
         let mut vars = DotenvageVars {
             age_key_name: None,
             system_store_dir: None,
         };
 
-        let Ok(content) = std::fs::read_to_string(file_path) else {
+        let Ok(Some(content)) = read_string_bounded_if_exists(file_path, 16 * 1024 * 1024).await
+        else {
             return Ok(vars);
         };
 
@@ -1343,11 +1348,7 @@ impl SecretManager {
         if let Ok(home) = std::env::var("HOME") {
             let home_path = PathBuf::from(home);
             let state_dir = home_path.join(".local/state").join(name);
-            // Prefer state dir unless config dir already exists
-            if state_dir.exists() || !home_path.join(".config").join(name).exists() {
-                return Some(state_dir);
-            }
-            return Some(home_path.join(".config").join(name));
+            return Some(state_dir);
         }
         None
     }

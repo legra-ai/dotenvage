@@ -20,9 +20,10 @@ pub struct JsSecretManager {
 impl JsSecretManager {
     /// Creates a new SecretManager by loading the key from standard locations
     #[napi]
-    pub fn new() -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         Ok(Self {
             inner: SecretManager::new()
+                .await
                 .map_err(|e| Error::new(Status::GenericFailure, format!("{}", e)))?,
         })
     }
@@ -96,9 +97,10 @@ pub struct JsEnvLoader {
 impl JsEnvLoader {
     /// Creates a new EnvLoader with a default SecretManager
     #[napi]
-    pub fn new() -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         Ok(Self {
             inner: EnvLoader::new()
+                .await
                 .map_err(|e| Error::new(Status::GenericFailure, format!("{}", e)))?,
         })
     }
@@ -115,10 +117,11 @@ impl JsEnvLoader {
     /// Decrypted values are loaded into the process environment.
     /// Returns the list of file paths that were actually loaded, in load order.
     #[napi]
-    pub fn load(&self) -> Result<Vec<String>> {
+    pub async fn load(&self) -> Result<Vec<String>> {
         let paths = self
             .inner
             .load()
+            .await
             .map_err(|e| Error::new(Status::GenericFailure, format!("{}", e)))?;
         Ok(paths
             .iter()
@@ -129,10 +132,11 @@ impl JsEnvLoader {
     /// Loads `.env` files from a specific directory using the same order.
     /// Returns the list of file paths that were actually loaded, in load order.
     #[napi]
-    pub fn load_from_dir(&self, dir: String) -> Result<Vec<String>> {
+    pub async fn load_from_dir(&self, dir: String) -> Result<Vec<String>> {
         let paths = self
             .inner
             .load_from_dir(Path::new(&dir))
+            .await
             .map_err(|e| Error::new(Status::GenericFailure, format!("{}", e)))?;
         Ok(paths
             .iter()
@@ -142,26 +146,30 @@ impl JsEnvLoader {
 
     /// Gets all variable names from all loaded `.env` files
     #[napi]
-    pub fn get_all_variable_names(&self) -> Result<Vec<String>> {
+    pub async fn get_all_variable_names(&self) -> Result<Vec<String>> {
         self.inner
             .get_all_variable_names()
+            .await
             .map_err(|e| Error::new(Status::GenericFailure, format!("{}", e)))
     }
 
     /// Gets all variable names from `.env` files in a specific directory
     #[napi]
-    pub fn get_all_variable_names_from_dir(&self, dir: String) -> Result<Vec<String>> {
+    pub async fn get_all_variable_names_from_dir(&self, dir: String) -> Result<Vec<String>> {
         self.inner
             .get_all_variable_names_from_dir(Path::new(&dir))
+            .await
             .map_err(|e| Error::new(Status::GenericFailure, format!("{}", e)))
     }
 
     /// Computes the ordered list of env file paths to load
     #[napi]
-    pub fn resolve_env_paths(&self, dir: String) -> Result<Vec<String>> {
+    pub async fn resolve_env_paths(&self, dir: String) -> Result<Vec<String>> {
         let paths = self
             .inner
             .resolve_env_paths(Path::new(&dir))
+            .await
+            .map_err(|e| Error::new(Status::GenericFailure, format!("{}", e)))?
             .iter()
             .map(|p| p.to_string_lossy().to_string())
             .collect();
@@ -171,16 +179,18 @@ impl JsEnvLoader {
     /// Gets all environment variables as a map (decrypted)
     /// Note: This loads variables into the process environment first
     #[napi]
-    pub fn get_all_variables(&self) -> Result<std::collections::HashMap<String, String>> {
+    pub async fn get_all_variables(&self) -> Result<std::collections::HashMap<String, String>> {
         // First load into environment (ignore returned paths)
         let _ = self
             .inner
             .load()
+            .await
             .map_err(|e| Error::new(Status::GenericFailure, format!("{}", e)))?;
 
         let names = self
             .inner
             .get_all_variable_names()
+            .await
             .map_err(|e| Error::new(Status::GenericFailure, format!("{}", e)))?;
 
         // Collect variables into a HashMap
@@ -198,7 +208,7 @@ impl JsEnvLoader {
     /// (decrypted) Note: This loads variables into the process environment
     /// first
     #[napi]
-    pub fn get_all_variables_from_dir(
+    pub async fn get_all_variables_from_dir(
         &self,
         dir: String,
     ) -> Result<std::collections::HashMap<String, String>> {
@@ -206,11 +216,13 @@ impl JsEnvLoader {
         let _ = self
             .inner
             .load_from_dir(Path::new(&dir))
+            .await
             .map_err(|e| Error::new(Status::GenericFailure, format!("{}", e)))?;
 
         let names = self
             .inner
             .get_all_variable_names_from_dir(Path::new(&dir))
+            .await
             .map_err(|e| Error::new(Status::GenericFailure, format!("{}", e)))?;
 
         // Collect variables into a HashMap

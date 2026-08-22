@@ -9,23 +9,29 @@
 //! Tests use unique service/account names to avoid collisions with
 //! real keys. All entries are cleaned up after each test.
 
-use std::fs;
 use std::process::Command;
 
 use assert_cmd::prelude::*;
+use async_fs_io::TempDir;
 use dotenvage::{
     KeyGenOptions,
     KeyStoreTarget,
     SecretManager,
 };
 use predicates::prelude::*;
-use tempfile::TempDir;
+
+mod common;
+use common::{
+    metadata,
+    read,
+    write,
+};
 
 // ── Helper ───────────────────────────────────────────────────
 
 /// Generate a key into a temp file and return the manager.
 #[cfg(unix)]
-fn generate_to_file(dir: &TempDir) -> (SecretManager, std::path::PathBuf) {
+async fn generate_to_file(dir: &TempDir) -> (SecretManager, std::path::PathBuf) {
     let path = dir.path().join("test.key");
     let result = SecretManager::generate_and_save(KeyGenOptions {
         target: KeyStoreTarget::File,
@@ -33,15 +39,16 @@ fn generate_to_file(dir: &TempDir) -> (SecretManager, std::path::PathBuf) {
         file_path: Some(path.clone()),
         force: false,
     })
+    .await
     .expect("generate_and_save file");
     (result.manager, path)
 }
 
 // ── generate_and_save: File target ───────────────────────────
 
-#[test]
-fn generate_and_save_file_creates_valid_key() {
-    let dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn generate_and_save_file_creates_valid_key() {
+    let dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let path = dir.path().join("new.key");
 
     let result = SecretManager::generate_and_save(KeyGenOptions {
@@ -50,10 +57,11 @@ fn generate_and_save_file_creates_valid_key() {
         file_path: Some(path.clone()),
         force: false,
     })
+    .await
     .expect("generate_and_save");
 
     // Key file exists and contains a secret key
-    let content = fs::read_to_string(&path).unwrap();
+    let content = read(&path).await.unwrap();
     assert!(
         content.contains("AGE-SECRET-KEY-"),
         "file should contain an AGE identity"
@@ -72,11 +80,11 @@ fn generate_and_save_file_creates_valid_key() {
     assert_eq!(decrypted, "hello");
 }
 
-#[test]
-fn generate_and_save_file_rejects_existing_without_force() {
-    let dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn generate_and_save_file_rejects_existing_without_force() {
+    let dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let path = dir.path().join("existing.key");
-    fs::write(&path, "placeholder").unwrap();
+    write(&path, "placeholder").await.unwrap();
 
     let err = SecretManager::generate_and_save(KeyGenOptions {
         target: KeyStoreTarget::File,
@@ -84,6 +92,7 @@ fn generate_and_save_file_rejects_existing_without_force() {
         file_path: Some(path),
         force: false,
     })
+    .await
     .unwrap_err();
 
     let msg = err.to_string();
@@ -94,11 +103,11 @@ fn generate_and_save_file_rejects_existing_without_force() {
     );
 }
 
-#[test]
-fn generate_and_save_file_force_overwrites() {
-    let dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn generate_and_save_file_force_overwrites() {
+    let dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let path = dir.path().join("overwrite.key");
-    fs::write(&path, "old-data").unwrap();
+    write(&path, "old-data").await.unwrap();
 
     let result = SecretManager::generate_and_save(KeyGenOptions {
         target: KeyStoreTarget::File,
@@ -106,17 +115,18 @@ fn generate_and_save_file_force_overwrites() {
         file_path: Some(path.clone()),
         force: true,
     })
+    .await
     .expect("forced overwrite should succeed");
 
-    let content = fs::read_to_string(&path).unwrap();
+    let content = read(&path).await.unwrap();
     assert!(content.contains("AGE-SECRET-KEY-"));
     assert!(result.public_key.starts_with("age1"));
 }
 
 // ── identity_string() ────────────────────────────────────────
 
-#[test]
-fn identity_string_is_accessible_and_roundtrips() {
+#[tokio::test]
+async fn identity_string_is_accessible_and_roundtrips() {
     let manager = SecretManager::generate().unwrap();
     let id_str = manager.identity_string();
 
@@ -167,8 +177,7 @@ mod os_keychain {
         )
     }
 
-    /// RAII guard that restores env vars and deletes the keychain
-    /// entry on drop.
+    /// Guard that restores the process environment after a keychain test.
     struct EnvGuard {
         orig_key_name: Option<String>,
         orig_service: Option<String>,
@@ -187,13 +196,16 @@ mod os_keychain {
                 orig_service,
             }
         }
+
+        async fn cleanup(&self) {
+            SecretManager::delete_from_os_keychain()
+                .await
+                .expect("delete test keychain entry");
+        }
     }
 
     impl Drop for EnvGuard {
         fn drop(&mut self) {
-            // Clean up the keychain entry via the public API
-            let _ = SecretManager::delete_from_os_keychain();
-
             // Restore env vars
             unsafe {
                 match &self.orig_key_name {
@@ -212,9 +224,9 @@ mod os_keychain {
         }
     }
 
-    #[test]
+    #[tokio::test]
     #[serial]
-    fn save_and_exists_roundtrip() {
+    async fn save_and_exists_roundtrip() {
         let key_name = test_key_name();
         let service = "dotenvage-test-roundtrip";
         let _guard = EnvGuard::new(&key_name, service);
@@ -227,7 +239,7 @@ mod os_keychain {
 
         // key_exists_in_os_keychain should now return true
         assert!(
-            SecretManager::key_exists_in_os_keychain(),
+            SecretManager::key_exists_in_os_keychain().await,
             "key should exist in OS keychain after save"
         );
 
@@ -236,46 +248,48 @@ mod os_keychain {
         let encrypted = manager.encrypt_value("keychain-roundtrip").unwrap();
         let decrypted = manager.decrypt_value(&encrypted).unwrap();
         assert_eq!(decrypted, "keychain-roundtrip");
+        _guard.cleanup().await;
     }
 
-    #[test]
+    #[tokio::test]
     #[serial]
-    fn not_found_returns_false() {
+    async fn not_found_returns_false() {
         let key_name = test_key_name();
         let service = "dotenvage-test-notfound";
         let _guard = EnvGuard::new(&key_name, service);
 
         assert!(
-            !SecretManager::key_exists_in_os_keychain(),
+            !SecretManager::key_exists_in_os_keychain().await,
             "non-existent key should not be found"
         );
+        _guard.cleanup().await;
     }
 
-    #[test]
+    #[tokio::test]
     #[serial]
-    fn delete_is_idempotent() {
+    async fn delete_is_idempotent() {
         let key_name = test_key_name();
         let service = "dotenvage-test-delete";
         let _guard = EnvGuard::new(&key_name, service);
 
         // Delete when nothing exists — should not error
-        SecretManager::delete_from_os_keychain().unwrap();
+        SecretManager::delete_from_os_keychain().await.unwrap();
 
         // Save, verify, delete, verify gone
         let manager = SecretManager::generate().unwrap();
         manager.save_key_to_os_keychain().unwrap();
-        assert!(SecretManager::key_exists_in_os_keychain());
+        assert!(SecretManager::key_exists_in_os_keychain().await);
 
-        SecretManager::delete_from_os_keychain().unwrap();
-        assert!(!SecretManager::key_exists_in_os_keychain());
+        SecretManager::delete_from_os_keychain().await.unwrap();
+        assert!(!SecretManager::key_exists_in_os_keychain().await);
 
         // Delete again — still should not error
-        SecretManager::delete_from_os_keychain().unwrap();
+        SecretManager::delete_from_os_keychain().await.unwrap();
     }
 
-    #[test]
+    #[tokio::test]
     #[serial]
-    fn generate_and_save_os_keychain_target() {
+    async fn generate_and_save_os_keychain_target() {
         let key_name = test_key_name();
         let service = "dotenvage-test-gen";
         let _guard = EnvGuard::new(&key_name, service);
@@ -286,6 +300,7 @@ mod os_keychain {
             file_path: None,
             force: false,
         })
+        .await
         .expect("generate_and_save OsKeychain");
 
         // Location reports keychain
@@ -298,12 +313,13 @@ mod os_keychain {
         );
 
         // Key exists via public API
-        assert!(SecretManager::key_exists_in_os_keychain());
+        assert!(SecretManager::key_exists_in_os_keychain().await);
 
         // Returned manager can encrypt/decrypt
         let encrypted = result.manager.encrypt_value("gen-keychain").unwrap();
         let decrypted = result.manager.decrypt_value(&encrypted).unwrap();
         assert_eq!(decrypted, "gen-keychain");
+        _guard.cleanup().await;
     }
 }
 
@@ -316,9 +332,9 @@ mod os_keychain {
 // writing to the real path fails with InsufficientPrivileges
 // when not elevated.
 
-#[test]
-fn system_store_path_is_platform_appropriate() {
-    let path = SecretManager::system_store_path();
+#[tokio::test]
+async fn system_store_path_is_platform_appropriate() {
+    let path = SecretManager::system_store_path().await;
     let path_str = path.to_string_lossy();
 
     #[cfg(target_os = "macos")]
@@ -345,9 +361,9 @@ fn system_store_path_is_platform_appropriate() {
 
 // ── CLI: --store system rejects --output ─────────────────────
 
-#[test]
-fn cli_store_system_rejects_output() {
-    let dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn cli_store_system_rejects_output() {
+    let dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let output = dir.path().join("should-not-exist.key");
 
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("dotenvage"));
@@ -369,14 +385,14 @@ fn cli_store_system_rejects_output() {
 // ── File-based key: permissions on Unix ──────────────────────
 
 #[cfg(unix)]
-#[test]
-fn key_file_has_restricted_permissions() {
+#[tokio::test]
+async fn key_file_has_restricted_permissions() {
     use std::os::unix::fs::PermissionsExt;
 
-    let dir = TempDir::new().unwrap();
-    let (_manager, path) = generate_to_file(&dir);
+    let dir = TempDir::create(std::env::temp_dir()).await.unwrap();
+    let (_manager, path) = generate_to_file(&dir).await;
 
-    let metadata = fs::metadata(&path).unwrap();
+    let metadata = metadata(&path).await.unwrap();
     let mode = metadata.permissions().mode() & 0o777;
     assert_eq!(
         mode, 0o600,
@@ -387,9 +403,9 @@ fn key_file_has_restricted_permissions() {
 
 // ── KeyGenResult fields ──────────────────────────────────────
 
-#[test]
-fn keygen_result_has_all_fields() {
-    let dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn keygen_result_has_all_fields() {
+    let dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let path = dir.path().join("fields.key");
 
     let result = SecretManager::generate_and_save(KeyGenOptions {
@@ -398,6 +414,7 @@ fn keygen_result_has_all_fields() {
         file_path: Some(path.clone()),
         force: false,
     })
+    .await
     .unwrap();
 
     // locations should have exactly one UserFile entry

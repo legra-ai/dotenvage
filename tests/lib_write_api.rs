@@ -1,7 +1,6 @@
 //! Integration tests for EnvLoader write APIs.
 
-use std::fs;
-
+use async_fs_io::TempDir;
 use dotenvage::{
     CouldBeSecret,
     EnvLoader,
@@ -9,11 +8,16 @@ use dotenvage::{
     Secret,
     SecretManager,
 };
-use tempfile::TempDir;
 
-#[test]
-fn set_var_in_file_encrypts_sensitive_keys() {
-    let temp_dir = TempDir::new().unwrap();
+mod common;
+use common::{
+    read,
+    write,
+};
+
+#[tokio::test]
+async fn set_var_in_file_encrypts_sensitive_keys() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let env_path = temp_dir.path().join(".env.local");
 
     let manager = SecretManager::generate().unwrap();
@@ -21,25 +25,26 @@ fn set_var_in_file_encrypts_sensitive_keys() {
 
     loader
         .set_var_in_file("WWKG_PASSPHRASE", "super-secret", &env_path)
+        .await
         .unwrap();
 
-    let raw = fs::read_to_string(&env_path).unwrap();
+    let raw = read(&env_path).await.unwrap();
     assert!(
         raw.contains("WWKG_PASSPHRASE=ENC[AGE:b64:"),
         "expected encrypted value in file, got: {}",
         raw
     );
 
-    let decrypted = loader.load_env_file(&env_path).unwrap();
+    let decrypted = loader.load_env_file(&env_path).await.unwrap();
     assert_eq!(
         decrypted.get("WWKG_PASSPHRASE"),
         Some(&"super-secret".to_string())
     );
 }
 
-#[test]
-fn set_var_in_file_keeps_non_sensitive_keys_plain() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn set_var_in_file_keeps_non_sensitive_keys_plain() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let env_path = temp_dir.path().join(".env.local");
 
     let manager = SecretManager::generate().unwrap();
@@ -47,16 +52,17 @@ fn set_var_in_file_keeps_non_sensitive_keys_plain() {
 
     loader
         .set_var_in_file("WWKG_ACTIVE_WORKSPACE", "alpha", &env_path)
+        .await
         .unwrap();
 
-    let raw = fs::read_to_string(&env_path).unwrap();
+    let raw = read(&env_path).await.unwrap();
     assert!(raw.contains("WWKG_ACTIVE_WORKSPACE=alpha"));
     assert!(!raw.contains("ENC[AGE:b64:"));
 }
 
-#[test]
-fn set_var_in_file_keeps_age_key_config_plain() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn set_var_in_file_keeps_age_key_config_plain() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let env_path = temp_dir.path().join(".env.local");
 
     let manager = SecretManager::generate().unwrap();
@@ -64,16 +70,17 @@ fn set_var_in_file_keeps_age_key_config_plain() {
 
     loader
         .set_var_in_file("AGE_KEY_NAME", "myapp/prod", &env_path)
+        .await
         .unwrap();
 
-    let raw = fs::read_to_string(&env_path).unwrap();
+    let raw = read(&env_path).await.unwrap();
     assert!(raw.contains("AGE_KEY_NAME=myapp/prod"));
     assert!(!raw.contains("ENC[AGE:b64:"));
 }
 
-#[test]
-fn set_var_in_file_does_not_double_encrypt() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn set_var_in_file_does_not_double_encrypt() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let env_path = temp_dir.path().join(".env.local");
 
     let manager = SecretManager::generate().unwrap();
@@ -82,25 +89,26 @@ fn set_var_in_file_does_not_double_encrypt() {
     let encrypted = manager.encrypt_value("super-secret").unwrap();
     loader
         .set_var_in_file("WWKG_PASSPHRASE", &encrypted, &env_path)
+        .await
         .unwrap();
 
-    let raw = fs::read_to_string(&env_path).unwrap();
+    let raw = read(&env_path).await.unwrap();
     assert!(
         raw.contains(&format!("WWKG_PASSPHRASE={}", encrypted)),
         "expected value to be written unchanged, got: {}",
         raw
     );
 
-    let decrypted = loader.load_env_file(&env_path).unwrap();
+    let decrypted = loader.load_env_file(&env_path).await.unwrap();
     assert_eq!(
         decrypted.get("WWKG_PASSPHRASE"),
         Some(&"super-secret".to_string())
     );
 }
 
-#[test]
-fn set_write_var_in_file_secret_forces_encryption() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn set_write_var_in_file_secret_forces_encryption() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let env_path = temp_dir.path().join(".env.local");
 
     let manager = SecretManager::generate().unwrap();
@@ -108,25 +116,26 @@ fn set_write_var_in_file_secret_forces_encryption() {
 
     loader
         .set_write_var_in_file(Secret("WWKG_ACTIVE_WORKSPACE", "alpha"), &env_path)
+        .await
         .unwrap();
 
-    let raw = fs::read_to_string(&env_path).unwrap();
+    let raw = read(&env_path).await.unwrap();
     assert!(
         raw.contains("WWKG_ACTIVE_WORKSPACE=ENC[AGE:b64:"),
         "expected encrypted value in file, got: {}",
         raw
     );
 
-    let decrypted = loader.load_env_file(&env_path).unwrap();
+    let decrypted = loader.load_env_file(&env_path).await.unwrap();
     assert_eq!(
         decrypted.get("WWKG_ACTIVE_WORKSPACE"),
         Some(&"alpha".to_string())
     );
 }
 
-#[test]
-fn set_write_var_in_file_non_secret_forces_plaintext() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn set_write_var_in_file_non_secret_forces_plaintext() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let env_path = temp_dir.path().join(".env.local");
 
     let manager = SecretManager::generate().unwrap();
@@ -134,16 +143,17 @@ fn set_write_var_in_file_non_secret_forces_plaintext() {
 
     loader
         .set_write_var_in_file(NonSecret("WWKG_PASSPHRASE", "super-secret"), &env_path)
+        .await
         .unwrap();
 
-    let raw = fs::read_to_string(&env_path).unwrap();
+    let raw = read(&env_path).await.unwrap();
     assert!(raw.contains("WWKG_PASSPHRASE=super-secret"));
     assert!(!raw.contains("ENC[AGE:b64:"));
 }
 
-#[test]
-fn set_write_var_in_file_could_be_secret_uses_name_based_detection() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn set_write_var_in_file_could_be_secret_uses_name_based_detection() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let env_path = temp_dir.path().join(".env.local");
 
     let manager = SecretManager::generate().unwrap();
@@ -151,30 +161,32 @@ fn set_write_var_in_file_could_be_secret_uses_name_based_detection() {
 
     loader
         .set_write_var_in_file(CouldBeSecret("WWKG_PASSPHRASE", "super-secret"), &env_path)
+        .await
         .unwrap();
 
-    let decrypted = loader.load_env_file(&env_path).unwrap();
+    let decrypted = loader.load_env_file(&env_path).await.unwrap();
     assert_eq!(
         decrypted.get("WWKG_PASSPHRASE"),
         Some(&"super-secret".to_string())
     );
 }
 
-#[test]
-fn set_var_in_dir_writes_env_local_and_preserves_existing_vars() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn set_var_in_dir_writes_env_local_and_preserves_existing_vars() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let env_path = temp_dir.path().join(".env.local");
-    fs::write(&env_path, "FOO=bar\n").unwrap();
+    write(&env_path, "FOO=bar\n").await.unwrap();
 
     let manager = SecretManager::generate().unwrap();
     let loader = EnvLoader::with_manager(manager);
 
     let written_path = loader
         .set_var_in_dir("HELLO", "world", temp_dir.path())
+        .await
         .unwrap();
     assert_eq!(written_path, env_path);
 
-    let raw = fs::read_to_string(&env_path).unwrap();
+    let raw = read(&env_path).await.unwrap();
     assert!(raw.contains("FOO=bar"));
     assert!(raw.contains("HELLO=world"));
 }

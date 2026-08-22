@@ -1,20 +1,25 @@
 //! Integration tests for the dump-to-writer functionality.
 
-use std::fs;
-
+use async_fs_io::TempDir;
 use dotenvage::SecretManager;
 use dotenvage::loader::EnvLoader;
 use serial_test::serial;
-use tempfile::TempDir;
 
-#[test]
-fn test_dump_to_writer_basic() {
-    let temp_dir = TempDir::new().unwrap();
+mod common;
+use common::write;
+
+#[tokio::test]
+async fn test_dump_to_writer_basic() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let temp_path = temp_dir.path();
 
     // Create test .env files
-    fs::write(temp_path.join(".env"), "VAR1=value1\nVAR2=value2").unwrap();
-    fs::write(temp_path.join(".env.local"), "VAR3=value3\nVAR1=overridden").unwrap();
+    write(temp_path.join(".env"), "VAR1=value1\nVAR2=value2")
+        .await
+        .unwrap();
+    write(temp_path.join(".env.local"), "VAR3=value3\nVAR1=overridden")
+        .await
+        .unwrap();
 
     let manager = SecretManager::generate().unwrap();
     let loader = EnvLoader::with_manager(manager);
@@ -22,6 +27,7 @@ fn test_dump_to_writer_basic() {
     let mut buffer = Vec::new();
     loader
         .dump_to_writer_from_dir(temp_path, &mut buffer)
+        .await
         .unwrap();
     let output = String::from_utf8(buffer).unwrap();
 
@@ -37,17 +43,16 @@ fn test_dump_to_writer_basic() {
     assert_eq!(lines[2], "VAR3=value3");
 }
 
-#[test]
-fn test_dump_to_writer_filters_age_keys() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn test_dump_to_writer_filters_age_keys() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let temp_path = temp_dir.path();
 
     // Create test .env file with AGE keys
-    fs::write(
+    write(
         temp_path.join(".env"),
         "VAR1=value1\nDOTENVAGE_AGE_KEY=secret_key\nAGE_KEY=another_key\nVAR2=value2\nEKG_AGE_KEY=ekg_key\nAGE_KEY_NAME=mykey\nPROJECT_AGE_KEY_NAME=project_key",
-    )
-    .unwrap();
+    ).await.unwrap();
 
     let manager = SecretManager::generate().unwrap();
     let loader = EnvLoader::with_manager(manager);
@@ -55,6 +60,7 @@ fn test_dump_to_writer_filters_age_keys() {
     let mut buffer = Vec::new();
     loader
         .dump_to_writer_from_dir(temp_path, &mut buffer)
+        .await
         .unwrap();
     let output = String::from_utf8(buffer).unwrap();
 
@@ -88,19 +94,20 @@ fn test_dump_to_writer_filters_age_keys() {
     );
 }
 
-#[test]
-fn test_dump_to_writer_handles_encrypted_values() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn test_dump_to_writer_handles_encrypted_values() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let temp_path = temp_dir.path();
 
     let manager = SecretManager::generate().unwrap();
     let encrypted = manager.encrypt_value("secret_value").unwrap();
 
     // Create test .env file with encrypted value
-    fs::write(
+    write(
         temp_path.join(".env"),
         format!("VAR1=plain\nVAR2={}", encrypted),
     )
+    .await
     .unwrap();
 
     let loader = EnvLoader::with_manager(manager);
@@ -108,6 +115,7 @@ fn test_dump_to_writer_handles_encrypted_values() {
     let mut buffer = Vec::new();
     loader
         .dump_to_writer_from_dir(temp_path, &mut buffer)
+        .await
         .unwrap();
     let output = String::from_utf8(buffer).unwrap();
 
@@ -117,16 +125,17 @@ fn test_dump_to_writer_handles_encrypted_values() {
     assert!(!output.contains("age:"));
 }
 
-#[test]
-fn test_dump_to_writer_quotes_special_values() {
-    let temp_dir = TempDir::new().unwrap();
+#[tokio::test]
+async fn test_dump_to_writer_quotes_special_values() {
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let temp_path = temp_dir.path();
 
     // Create test .env file with values that need quoting
-    fs::write(
+    write(
         temp_path.join(".env"),
         "VAR1=simple\nVAR2=has spaces\nVAR3=has\"quotes\nVAR4=\nVAR5=has=equals",
     )
+    .await
     .unwrap();
 
     let manager = SecretManager::generate().unwrap();
@@ -135,6 +144,7 @@ fn test_dump_to_writer_quotes_special_values() {
     let mut buffer = Vec::new();
     loader
         .dump_to_writer_from_dir(temp_path, &mut buffer)
+        .await
         .unwrap();
     let output = String::from_utf8(buffer).unwrap();
 
@@ -148,9 +158,9 @@ fn test_dump_to_writer_quotes_special_values() {
     assert!(output.contains("VAR5=\"has=equals\""));
 }
 
-#[test]
+#[tokio::test]
 #[serial]
-fn test_dump_to_writer_with_dynamic_discovery() {
+async fn test_dump_to_writer_with_dynamic_discovery() {
     // Test that dump_to_writer uses dynamic dimension discovery
     // This ensures variables from files loaded via discovered dimensions are
     // included
@@ -170,26 +180,30 @@ fn test_dump_to_writer_with_dynamic_discovery() {
         }
     }
 
-    let temp_dir = TempDir::new().unwrap();
+    let temp_dir = TempDir::create(std::env::temp_dir()).await.unwrap();
     let temp_path = temp_dir.path();
 
     let manager = SecretManager::generate().unwrap();
 
     // .env sets EKG_VARIANT=oxigraph (dimension discovery)
-    fs::write(
+    write(
         temp_path.join(".env"),
         "BASE_VAR=base\nEKG_VARIANT=oxigraph\n",
     )
+    .await
     .unwrap();
 
     // .env.local is loaded (ENV defaults to local)
-    fs::write(temp_path.join(".env.local"), "LOCAL_VAR=local\n").unwrap();
+    write(temp_path.join(".env.local"), "LOCAL_VAR=local\n")
+        .await
+        .unwrap();
 
     // .env.local.oxigraph should be loaded via dynamic discovery
-    fs::write(
+    write(
         temp_path.join(".env.local.oxigraph"),
         "OXIGRAPH_VAR=oxigraph_value\n",
     )
+    .await
     .unwrap();
 
     let loader = EnvLoader::with_manager(manager);
@@ -197,6 +211,7 @@ fn test_dump_to_writer_with_dynamic_discovery() {
     let mut buffer = Vec::new();
     loader
         .dump_to_writer_from_dir(temp_path, &mut buffer)
+        .await
         .unwrap();
     let output = String::from_utf8(buffer).unwrap();
 

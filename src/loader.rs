@@ -8,10 +8,18 @@ use std::collections::{
     HashMap,
     HashSet,
 };
-use std::io::Write;
 use std::path::{
     Path,
     PathBuf,
+};
+
+use async_fs_io::{
+    DirectoryReader,
+    ensure_dir,
+    read_string_bounded,
+    read_string_bounded_if_exists,
+    try_exists,
+    write_bytes,
 };
 
 use crate::error::{
@@ -214,9 +222,10 @@ impl std::str::FromStr for Os {
 /// ```rust,no_run
 /// use dotenvage::EnvLoader;
 ///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # #[tokio::main]
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Load from current directory
-/// let loaded_files = EnvLoader::new()?.load()?;
+/// let loaded_files = EnvLoader::new().await?.load().await?;
 /// println!("Loaded {} .env files", loaded_files.len());
 ///
 /// // Now encrypted values are available via std::env::var
@@ -254,6 +263,7 @@ impl std::str::FromStr for Os {
 ///   [`resolve_variant()`](Self::resolve_variant))
 /// - **`<PR_NUMBER>`**: Pull request number (see
 ///   [`resolve_pr_number()`](Self::resolve_pr_number))
+#[derive(Clone)]
 pub struct EnvLoader {
     manager: SecretManager,
 }
@@ -297,25 +307,47 @@ impl<'a> From<CouldBeSecret<'a>> for WriteVar<'a> {
 }
 
 impl EnvLoader {
-    fn find_file_case_insensitive(dir: &Path, filename: &str) -> Option<PathBuf> {
+    async fn find_file_case_insensitive(
+        dir: &Path,
+        filename: &str,
+    ) -> SecretsResult<Option<PathBuf>> {
         let target = filename.to_lowercase();
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                if name.to_string_lossy().to_lowercase() == target {
-                    return Some(entry.path());
-                }
+        let Some(mut entries) = DirectoryReader::open_if_exists(dir).await.map_err(|e| {
+            SecretsError::EnvFileReadFailed {
+                path: dir.display().to_string(),
+                reason: e.to_string(),
+            }
+        })?
+        else {
+            return Ok(None);
+        };
+        while let Some(entry) =
+            entries
+                .next()
+                .await
+                .map_err(|e| SecretsError::EnvFileReadFailed {
+                    path: dir.display().to_string(),
+                    reason: e.to_string(),
+                })?
+        {
+            if entry.name().to_string_lossy().to_lowercase() == target {
+                return Ok(Some(entry.path().to_path_buf()));
             }
         }
-        None
+        Ok(None)
     }
 
-    fn add_exact_if_exist(dir: &Path, paths: &mut Vec<PathBuf>, filename: &str) {
-        if let Some(p) = Self::find_file_case_insensitive(dir, filename)
+    async fn add_exact_if_exist(
+        dir: &Path,
+        paths: &mut Vec<PathBuf>,
+        filename: &str,
+    ) -> SecretsResult<()> {
+        if let Some(p) = Self::find_file_case_insensitive(dir, filename).await?
             && !paths.iter().any(|x| x == &p)
         {
             paths.push(p);
         }
+        Ok(())
     }
 
     /// Creates a new `EnvLoader` with a default `SecretManager`.
@@ -331,9 +363,9 @@ impl EnvLoader {
     /// # Errors
     ///
     /// Returns an error if no encryption key can be found or loaded.
-    pub fn new() -> SecretsResult<Self> {
+    pub async fn new() -> SecretsResult<Self> {
         Ok(Self {
-            manager: SecretManager::new()?,
+            manager: SecretManager::new().await?,
         })
     }
 
@@ -349,10 +381,11 @@ impl EnvLoader {
     ///     SecretManager,
     /// };
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let manager = SecretManager::generate()?;
     /// let loader = EnvLoader::with_manager(manager);
-    /// let loaded_files = loader.load()?;
+    /// let loaded_files = loader.load().await?;
     /// println!("Loaded {} .env files", loaded_files.len());
     /// # Ok(())
     /// # }
@@ -384,15 +417,16 @@ impl EnvLoader {
     /// ```rust,no_run
     /// use dotenvage::EnvLoader;
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loaded_files = EnvLoader::new()?.load()?;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loaded_files = EnvLoader::new().await?.load().await?;
     /// println!("Loaded {} .env files", loaded_files.len());
     /// let secret = std::env::var("API_TOKEN")?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn load(&self) -> SecretsResult<Vec<PathBuf>> {
-        self.load_from_dir(".")
+    pub async fn load(&self) -> SecretsResult<Vec<PathBuf>> {
+        self.load_from_dir(".").await
     }
 
     /// Loads `.env` files from a specific directory using the same order as
@@ -426,17 +460,15 @@ impl EnvLoader {
     /// key) are silently dropped from the result; any value already set
     /// in the parent process for that key is therefore preserved. Each
     /// skipped value is reported on stderr.
-    pub fn load_from_dir(&self, dir: impl AsRef<Path>) -> SecretsResult<Vec<PathBuf>> {
+    pub async fn load_from_dir(&self, dir: impl AsRef<Path>) -> SecretsResult<Vec<PathBuf>> {
         let dir = dir.as_ref();
         let mut env_vars = HashMap::new();
         let mut loaded_files: HashSet<PathBuf> = HashSet::new();
         let mut loaded_order: Vec<PathBuf> = Vec::new();
 
         // Step 1: Load base .env first
-        if let Some(base_path) = Self::find_file_case_insensitive(dir, ".env")
-            && base_path.exists()
-        {
-            let vars = self.load_env_file(&base_path)?;
+        if let Some(base_path) = Self::find_file_case_insensitive(dir, ".env").await? {
+            let vars = self.load_env_file(&base_path).await?;
             env_vars.extend(vars.clone());
             loaded_order.push(base_path.clone());
             loaded_files.insert(base_path);
@@ -452,19 +484,30 @@ impl EnvLoader {
         // Step 3: Iteratively load files and discover new dimensions
         loop {
             // Compute paths based on current dimension values
-            let candidate_paths = self.resolve_env_paths(dir);
+            let candidate_paths = self.resolve_env_paths(dir).await?;
 
             // Find next unloaded file in specificity order
-            let next_file = candidate_paths
-                .into_iter()
-                .find(|p| !loaded_files.contains(p) && p.exists());
+            let mut next_file = None;
+            for path in candidate_paths {
+                if !loaded_files.contains(&path)
+                    && try_exists(&path)
+                        .await
+                        .map_err(|e| SecretsError::EnvFileReadFailed {
+                            path: path.display().to_string(),
+                            reason: e.to_string(),
+                        })?
+                {
+                    next_file = Some(path);
+                    break;
+                }
+            }
 
             let Some(path) = next_file else {
                 break;
             };
 
             // Load the file
-            let vars = self.load_env_file(&path)?;
+            let vars = self.load_env_file(&path).await?;
             env_vars.extend(vars.clone());
             loaded_order.push(path.clone());
             loaded_files.insert(path);
@@ -510,7 +553,7 @@ impl EnvLoader {
     /// key) are silently dropped from the result; any value already set
     /// in the parent process for that key is therefore preserved. Each
     /// skipped value is reported on stderr.
-    pub fn collect_all_vars_from_dir(
+    pub async fn collect_all_vars_from_dir(
         &self,
         dir: impl AsRef<Path>,
     ) -> SecretsResult<(HashMap<String, String>, Vec<PathBuf>)> {
@@ -523,10 +566,8 @@ impl EnvLoader {
         let saved_env = Self::save_dimension_env_vars();
 
         // Step 1: Load base .env first
-        if let Some(base_path) = Self::find_file_case_insensitive(dir, ".env")
-            && base_path.exists()
-        {
-            let vars = self.load_env_file(&base_path)?;
+        if let Some(base_path) = Self::find_file_case_insensitive(dir, ".env").await? {
+            let vars = self.load_env_file(&base_path).await?;
             env_vars.extend(vars.clone());
             loaded_order.push(base_path.clone());
             loaded_files.insert(base_path);
@@ -542,19 +583,30 @@ impl EnvLoader {
         // Step 3: Iteratively load files and discover new dimensions
         loop {
             // Compute paths based on current dimension values
-            let candidate_paths = self.resolve_env_paths(dir);
+            let candidate_paths = self.resolve_env_paths(dir).await?;
 
             // Find next unloaded file in specificity order
-            let next_file = candidate_paths
-                .into_iter()
-                .find(|p| !loaded_files.contains(p) && p.exists());
+            let mut next_file = None;
+            for path in candidate_paths {
+                if !loaded_files.contains(&path)
+                    && try_exists(&path)
+                        .await
+                        .map_err(|e| SecretsError::EnvFileReadFailed {
+                            path: path.display().to_string(),
+                            reason: e.to_string(),
+                        })?
+                {
+                    next_file = Some(path);
+                    break;
+                }
+            }
 
             let Some(path) = next_file else {
                 break;
             };
 
             // Load the file
-            let vars = self.load_env_file(&path)?;
+            let vars = self.load_env_file(&path).await?;
             env_vars.extend(vars.clone());
             loaded_order.push(path.clone());
             loaded_files.insert(path);
@@ -621,6 +673,10 @@ impl EnvLoader {
     ///
     /// A vector of paths in load order (later paths override earlier ones).
     ///
+    /// # Errors
+    ///
+    /// Returns an error when an environment file or directory cannot be read.
+    ///
     /// # Examples
     ///
     /// With `ENV=local`, `OS=linux`, `ARCH=amd64`, `USER=alice`,
@@ -636,15 +692,15 @@ impl EnvLoader {
     /// - ... (all 31 non-empty subsets)
     /// - `.env.local.linux.amd64.alice.docker`
     /// - `.env.pr-<NUMBER>` (if applicable)
-    pub fn resolve_env_paths(&self, dir: &Path) -> Vec<PathBuf> {
+    pub async fn resolve_env_paths(&self, dir: &Path) -> SecretsResult<Vec<PathBuf>> {
         let mut paths: Vec<PathBuf> = Vec::new();
 
         // Always start with base .env
-        Self::add_exact_if_exist(dir, &mut paths, ".env");
+        Self::add_exact_if_exist(dir, &mut paths, ".env").await?;
 
         // Discover ENV configuration from .env file before resolving dimensions
         // This allows NODE_ENV in .env to determine which files to load
-        Self::discover_env_from_env_file(dir);
+        Self::discover_env_from_env_file(dir).await?;
 
         // Resolve all dimensions
         let env = Self::resolve_env();
@@ -695,15 +751,15 @@ impl EnvLoader {
 
             // Build filename with dots as separators
             let filename = format!(".env.{}", parts.join("."));
-            Self::add_exact_if_exist(dir, &mut paths, &filename);
+            Self::add_exact_if_exist(dir, &mut paths, &filename).await?;
         }
 
         // PR-specific always comes last (highest precedence)
         if let Some(pr_number) = Self::resolve_pr_number() {
-            Self::add_exact_if_exist(dir, &mut paths, &format!(".env.pr-{}", pr_number));
+            Self::add_exact_if_exist(dir, &mut paths, &format!(".env.pr-{}", pr_number)).await?;
         }
 
-        paths
+        Ok(paths)
     }
 
     /// Loads and decrypts a single `.env` file, returning key/value pairs.
@@ -713,9 +769,10 @@ impl EnvLoader {
     /// Returns an error if the file cannot be read or parsed. Values that
     /// fail to decrypt are silently dropped from the returned map (see
     /// [`parse_and_decrypt`](Self::parse_and_decrypt)).
-    pub fn load_env_file(&self, path: &Path) -> SecretsResult<HashMap<String, String>> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| SecretsError::EnvFileReadFailed {
+    pub async fn load_env_file(&self, path: &Path) -> SecretsResult<HashMap<String, String>> {
+        let content = read_string_bounded(path, 16 * 1024 * 1024)
+            .await
+            .map_err(|e| SecretsError::EnvFileReadFailed {
                 path: path.display().to_string(),
                 reason: e.to_string(),
             })?;
@@ -796,8 +853,9 @@ impl EnvLoader {
     /// ```rust,no_run
     /// use dotenvage::EnvLoader;
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loader = EnvLoader::new()?;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = EnvLoader::new().await?;
     /// let port = loader.get_var_or("PORT", "8080");
     /// # Ok(())
     /// # }
@@ -819,8 +877,8 @@ impl EnvLoader {
     /// - The target file cannot be read or parsed
     /// - Encryption fails
     /// - The updated file cannot be written
-    pub fn set_var(&self, key: &str, value: &str) -> SecretsResult<PathBuf> {
-        self.set_var_in_dir(key, value, ".")
+    pub async fn set_var(&self, key: &str, value: &str) -> SecretsResult<PathBuf> {
+        self.set_var_in_dir(key, value, ".").await
     }
 
     /// Sets a variable in `.env.local` in a specific directory.
@@ -833,14 +891,14 @@ impl EnvLoader {
     /// - The target file cannot be read or parsed
     /// - Encryption fails
     /// - The updated file cannot be written
-    pub fn set_var_in_dir(
+    pub async fn set_var_in_dir(
         &self,
         key: &str,
         value: &str,
         dir: impl AsRef<Path>,
     ) -> SecretsResult<PathBuf> {
         let path = dir.as_ref().join(".env.local");
-        self.set_var_in_file(key, value, &path)?;
+        self.set_var_in_file(key, value, &path).await?;
         Ok(path)
     }
 
@@ -860,13 +918,14 @@ impl EnvLoader {
     /// - The target file cannot be read or parsed
     /// - Encryption fails
     /// - The updated file cannot be written
-    pub fn set_var_in_file(
+    pub async fn set_var_in_file(
         &self,
         key: &str,
         value: &str,
         path: impl AsRef<Path>,
     ) -> SecretsResult<()> {
         self.set_write_var_in_file(CouldBeSecret(key, value), path)
+            .await
     }
 
     /// Sets a variable in a specific `.env` file path with an explicit
@@ -884,7 +943,7 @@ impl EnvLoader {
     ///
     /// Returns an error if the target file cannot be read or parsed, encryption
     /// fails, or the updated file cannot be written.
-    pub fn set_write_var_in_file<'a>(
+    pub async fn set_write_var_in_file<'a>(
         &self,
         var: impl Into<WriteVar<'a>>,
         path: impl AsRef<Path>,
@@ -896,7 +955,7 @@ impl EnvLoader {
         };
 
         let path = path.as_ref();
-        let mut vars = Self::read_env_file_for_write(path)?;
+        let mut vars = Self::read_env_file_for_write(path).await?;
 
         // AGE key variables must stay plaintext for key discovery.
         let is_age_key = Self::is_age_key_variable(key);
@@ -909,7 +968,7 @@ impl EnvLoader {
         };
 
         vars.insert(key.to_string(), final_value);
-        Self::write_env_file_for_write(path, &vars)
+        Self::write_env_file_for_write(path, &vars).await
     }
 
     /// Removes a variable from `.env.local` in the current working directory.
@@ -920,8 +979,8 @@ impl EnvLoader {
     /// # Errors
     ///
     /// Returns an error if the target file cannot be read, parsed, or written.
-    pub fn unset_var(&self, key: &str) -> SecretsResult<PathBuf> {
-        self.unset_var_in_dir(key, ".")
+    pub async fn unset_var(&self, key: &str) -> SecretsResult<PathBuf> {
+        self.unset_var_in_dir(key, ".").await
     }
 
     /// Removes a variable from `.env.local` in a specific directory.
@@ -931,9 +990,13 @@ impl EnvLoader {
     /// # Errors
     ///
     /// Returns an error if the target file cannot be read, parsed, or written.
-    pub fn unset_var_in_dir(&self, key: &str, dir: impl AsRef<Path>) -> SecretsResult<PathBuf> {
+    pub async fn unset_var_in_dir(
+        &self,
+        key: &str,
+        dir: impl AsRef<Path>,
+    ) -> SecretsResult<PathBuf> {
         let path = dir.as_ref().join(".env.local");
-        self.unset_var_in_file(key, &path)?;
+        self.unset_var_in_file(key, &path).await?;
         Ok(path)
     }
 
@@ -944,26 +1007,26 @@ impl EnvLoader {
     /// # Errors
     ///
     /// Returns an error if the target file cannot be read, parsed, or written.
-    pub fn unset_var_in_file(&self, key: &str, path: impl AsRef<Path>) -> SecretsResult<()> {
+    pub async fn unset_var_in_file(&self, key: &str, path: impl AsRef<Path>) -> SecretsResult<()> {
         let path = path.as_ref();
-        let mut vars = Self::read_env_file_for_write(path)?;
+        let mut vars = Self::read_env_file_for_write(path).await?;
         if vars.remove(key).is_some() {
-            Self::write_env_file_for_write(path, &vars)?;
+            Self::write_env_file_for_write(path, &vars).await?;
         }
         Ok(())
     }
 
     /// Parses an env file into a key-value map for write/update operations.
-    fn read_env_file_for_write(path: &Path) -> SecretsResult<HashMap<String, String>> {
-        if !path.exists() {
-            return Ok(HashMap::new());
-        }
-
-        let content =
-            std::fs::read_to_string(path).map_err(|e| SecretsError::EnvFileReadFailed {
+    async fn read_env_file_for_write(path: &Path) -> SecretsResult<HashMap<String, String>> {
+        let Some(content) = read_string_bounded_if_exists(path, 16 * 1024 * 1024)
+            .await
+            .map_err(|e| SecretsError::EnvFileReadFailed {
                 path: path.display().to_string(),
                 reason: e.to_string(),
-            })?;
+            })?
+        else {
+            return Ok(HashMap::new());
+        };
 
         dotenvy::from_read_iter(content.as_bytes())
             .collect::<Result<HashMap<String, String>, _>>()
@@ -974,31 +1037,38 @@ impl EnvLoader {
     }
 
     /// Writes key-value pairs to an env file in sorted KEY=VALUE format.
-    fn write_env_file_for_write(path: &Path, vars: &HashMap<String, String>) -> SecretsResult<()> {
+    async fn write_env_file_for_write(
+        path: &Path,
+        vars: &HashMap<String, String>,
+    ) -> SecretsResult<()> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
+            ensure_dir(parent)
+                .await
                 .map_err(|e| SecretsError::WriteFailed(e.to_string()))?;
         }
 
-        let mut file =
-            std::fs::File::create(path).map_err(|e| SecretsError::WriteFailed(e.to_string()))?;
         let mut keys: Vec<_> = vars.keys().cloned().collect();
         keys.sort();
+        let mut output = String::new();
 
         for key in keys {
             let value = vars
                 .get(&key)
                 .ok_or_else(|| SecretsError::WriteFailed("missing key during write".to_string()))?;
             if Self::needs_env_file_quoting(value) {
-                writeln!(file, "{}=\"{}\"", key, Self::escape_env_file_value(value))
-                    .map_err(|e| SecretsError::WriteFailed(e.to_string()))?;
+                output.push_str(&format!(
+                    "{}=\"{}\"\n",
+                    key,
+                    Self::escape_env_file_value(value)
+                ));
             } else {
-                writeln!(file, "{}={}", key, value)
-                    .map_err(|e| SecretsError::WriteFailed(e.to_string()))?;
+                output.push_str(&format!("{}={}\n", key, value));
             }
         }
 
-        Ok(())
+        write_bytes(path, output.as_bytes())
+            .await
+            .map_err(|e| SecretsError::WriteFailed(e.to_string()))
     }
 
     /// Check if a value needs quoting in `.env` output.
@@ -1047,9 +1117,10 @@ impl EnvLoader {
     /// ```rust,no_run
     /// use dotenvage::EnvLoader;
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loader = EnvLoader::new()?;
-    /// let variable_names = loader.get_all_variable_names()?;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = EnvLoader::new().await?;
+    /// let variable_names = loader.get_all_variable_names().await?;
     /// println!("Found {} variables", variable_names.len());
     /// for name in &variable_names {
     ///     println!("  - {}", name);
@@ -1057,8 +1128,8 @@ impl EnvLoader {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get_all_variable_names(&self) -> SecretsResult<Vec<String>> {
-        self.get_all_variable_names_from_dir(".")
+    pub async fn get_all_variable_names(&self) -> SecretsResult<Vec<String>> {
+        self.get_all_variable_names_from_dir(".").await
     }
 
     /// Gets all variable names from all `.env*` files in a specific directory.
@@ -1077,17 +1148,18 @@ impl EnvLoader {
     /// ```rust,no_run
     /// use dotenvage::EnvLoader;
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loader = EnvLoader::new()?;
-    /// let variable_names = loader.get_all_variable_names_from_dir("./config")?;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = EnvLoader::new().await?;
+    /// let variable_names = loader.get_all_variable_names_from_dir("./config").await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn get_all_variable_names_from_dir(
+    pub async fn get_all_variable_names_from_dir(
         &self,
         dir: impl AsRef<Path>,
     ) -> SecretsResult<Vec<String>> {
-        let (vars, _paths) = self.collect_all_vars_from_dir(dir)?;
+        let (vars, _paths) = self.collect_all_vars_from_dir(dir).await?;
 
         // Filter out AGE key variables - we don't expose these secrets
         Ok(vars
@@ -1124,17 +1196,18 @@ impl EnvLoader {
     ///
     /// use dotenvage::EnvLoader;
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let loader = EnvLoader::new()?;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let loader = EnvLoader::new().await?;
     /// let mut buffer = Vec::new();
-    /// loader.dump_to_writer(&mut buffer)?;
+    /// loader.dump_to_writer(&mut buffer).await?;
     /// let output = String::from_utf8(buffer)?;
     /// println!("{}", output);
     /// # Ok(())
     /// # }
     /// ```
-    pub fn dump_to_writer<W: std::io::Write>(&self, writer: W) -> SecretsResult<()> {
-        self.dump_to_writer_from_dir(".", writer)
+    pub async fn dump_to_writer<W: std::io::Write>(&self, writer: W) -> SecretsResult<()> {
+        self.dump_to_writer_from_dir(".", writer).await
     }
 
     /// Write all merged .env variables in KEY=VALUE format to a writer from a
@@ -1149,13 +1222,13 @@ impl EnvLoader {
     /// - Writing to the writer fails
     /// - .env files cannot be loaded
     /// - Decryption fails for any encrypted value
-    pub fn dump_to_writer_from_dir<W: std::io::Write>(
+    pub async fn dump_to_writer_from_dir<W: std::io::Write>(
         &self,
         dir: impl AsRef<Path>,
         mut writer: W,
     ) -> SecretsResult<()> {
         // Use dynamic discovery to collect all variables
-        let (merged_vars, _paths) = self.collect_all_vars_from_dir(dir)?;
+        let (merged_vars, _paths) = self.collect_all_vars_from_dir(dir).await?;
 
         // Sort keys for consistent output
         let mut keys: Vec<_> = merged_vars.keys().cloned().collect();
@@ -1233,7 +1306,7 @@ impl EnvLoader {
     /// Unlike AGE_KEY_NAME, ENV configuration variables can be encrypted, but
     /// if they are encrypted, they won't be available for file path resolution
     /// and the system will fall back to defaulting to "local".
-    fn discover_env_from_env_file(dir: &Path) {
+    async fn discover_env_from_env_file(dir: &Path) -> SecretsResult<()> {
         // Skip if any ENV variable is already set in environment
         // Environment variables always take precedence over .env file
         if std::env::var("DOTENVAGE_ENV").is_ok()
@@ -1241,18 +1314,19 @@ impl EnvLoader {
             || std::env::var("VERCEL_ENV").is_ok()
             || std::env::var("NODE_ENV").is_ok()
         {
-            return;
+            return Ok(());
         }
 
         // Try to read .env file
         let env_file = dir.join(".env");
-        if let Some(config_key) = Self::find_env_config_in_file(&env_file) {
+        if let Some(config_key) = Self::find_env_config_in_file(&env_file).await? {
             // Set the first ENV config variable we find (in priority order)
             // This will be read by resolve_env() later
             unsafe {
                 std::env::set_var(config_key.0, config_key.1);
             }
         }
+        Ok(())
     }
 
     /// Searches a single .env file for ENV configuration variables.
@@ -1263,18 +1337,26 @@ impl EnvLoader {
     /// Checks variables in priority order: DOTENVAGE_ENV, EKG_ENV, VERCEL_ENV,
     /// NODE_ENV. Returns the highest priority one found. If a variable is
     /// encrypted, it's skipped.
-    fn find_env_config_in_file(file_path: &Path) -> Option<(String, String)> {
-        let content = std::fs::read_to_string(file_path).ok()?;
+    async fn find_env_config_in_file(file_path: &Path) -> SecretsResult<Option<(String, String)>> {
+        let Some(content) = read_string_bounded_if_exists(file_path, 16 * 1024 * 1024)
+            .await
+            .map_err(|e| SecretsError::EnvFileReadFailed {
+                path: file_path.display().to_string(),
+                reason: e.to_string(),
+            })?
+        else {
+            return Ok(None);
+        };
 
         // Check in priority order across all lines
         // Priority: DOTENVAGE_ENV > EKG_ENV > VERCEL_ENV > NODE_ENV
         for key in &["DOTENVAGE_ENV", "EKG_ENV", "VERCEL_ENV", "NODE_ENV"] {
             if let Some(value) = Self::find_key_value_in_content(&content, key) {
-                return Some((key.to_string(), value));
+                return Ok(Some((key.to_string(), value)));
             }
         }
 
-        None
+        Ok(None)
     }
 
     /// Helper function to find a key-value pair in file content.
