@@ -4,11 +4,18 @@ on:
     workflows: [CI/CD]
     types: [completed]
 permissions:
-  contents: write
-  pull-requests: write
-  actions: write
+  contents: read
 jobs:
   merge:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: writer
+        with:
+          app-id: ${{ secrets.RELEASE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_WRITER_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
       - uses: legra-ai/github-actions/.github/actions/merge-tested-dependabot@main
+        with:
+          token: ${{ steps.writer.outputs.token }}

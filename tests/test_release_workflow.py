@@ -12,6 +12,19 @@ WORKFLOW = (
 class ReleaseWorkflowTests(unittest.TestCase):
     """Keep publishing and validation attached to one immutable revision."""
 
+    def test_writers_use_scoped_app_tokens(self) -> None:
+        root = Path(__file__).parents[1]
+        for source in [WORKFLOW, (root / ".github/workflows/dependabot-merge.yml").read_text()]:
+            self.assertIn("uses: actions/create-github-app-token@v2", source)
+            self.assertIn("repositories: ${{ github.event.repository.name }}", source)
+            self.assertIn("token: ${{ steps.writer.outputs.token }}", source)
+
+    def test_existing_packages_require_verified_identity(self) -> None:
+        self.assertNotIn("skip-existing: true", WORKFLOW)
+        self.assertNotIn("EPUBLISHCONFLICT", WORKFLOW)
+        for command in ["stage", "check-npm", "filter-python", "verify-python"]:
+            self.assertIn(f"python3 scripts/release-packages.py {command}", WORKFLOW)
+
     def test_tag_and_release_use_the_prepared_revision(self) -> None:
         """The triggering SHA is not the generated and validated version commit."""
         self.assertNotIn("      - name: Push Release Tag\n", WORKFLOW)
