@@ -3,8 +3,11 @@
 import base64
 import hashlib
 import importlib.util
+import json
+import os
 from pathlib import Path
 import tempfile
+import zipfile
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -59,7 +62,7 @@ class RegistryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "PyPI.*identity"):
                 release.missing_wheels("1.2.3", [wheel, other])
 
-    def test_bundle_rejects_wrong_revision_and_changed_bytes(self):
+    def test_bundle_rejects_wrong_revision(self):
         bundle = self.package.with_name("release-packages.zip")
         release.write_bundle(bundle, "1.2.3", "a" * 40, [self.package])
         with self.assertRaisesRegex(ValueError, "revision"):
@@ -67,6 +70,37 @@ class RegistryTests(unittest.TestCase):
         output = self.package.parent / "restored"
         release.read_bundle(bundle, "1.2.3", "a" * 40, output)
         self.assertEqual((output / self.package.name).read_bytes(), self.package.read_bytes())
+
+
+    def test_bundle_rejects_changed_archive_bytes(self):
+        bundle = self.package.with_name("release-packages.zip")
+        release.write_bundle(bundle, "1.2.3", "a" * 40, [self.package])
+        with zipfile.ZipFile(bundle) as archive:
+            manifest = archive.read("manifest.json")
+        with zipfile.ZipFile(bundle, "w") as archive:
+            archive.writestr("manifest.json", manifest)
+            archive.writestr(self.package.name, b"unrelated build")
+        with self.assertRaisesRegex(ValueError, "identity mismatch"):
+            release.read_bundle(bundle, "1.2.3", "a" * 40, self.package.parent / "invalid")
+
+    def test_retry_uses_persisted_archives_without_repacking(self):
+        bundle = self.package.with_name("release-packages.zip")
+        release.write_bundle(bundle, "1.2.3", "a" * 40, [self.package])
+        self.package.write_bytes(b"new rebuild with different bytes")
+        original = Path.cwd()
+        try:
+            os.chdir(self.package.parent)
+            with patch.object(release.subprocess, "check_output", return_value=json.dumps({
+                "assets": [{"name": bundle.name}]
+            })) as query, patch.object(release.subprocess, "run") as command:
+                release.stage("1.2.3", "a" * 40)
+                query.assert_called_once()
+                command.assert_called_once_with(
+                    ["gh", "release", "download", "v1.2.3", "--pattern", bundle.name], check=True
+                )
+                self.assertEqual(Path("release-packages/package.tgz").read_bytes(), b"validated package")
+        finally:
+            os.chdir(original)
 
 
 if __name__ == "__main__":
