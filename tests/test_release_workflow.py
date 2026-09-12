@@ -12,6 +12,16 @@ WORKFLOW = (
 class ReleaseWorkflowTests(unittest.TestCase):
     """Keep publishing and validation attached to one immutable revision."""
 
+    def test_fork_pr_validation_does_not_require_app_secrets(self) -> None:
+        prepare = WORKFLOW.split("  version-check:", 1)[1].split("  build-artifacts:", 1)[0]
+        self.assertIn("if: github.event_name != 'pull_request'", prepare)
+        self.assertIn("github.event_name == 'pull_request' && github.token", prepare)
+
+    def test_required_gate_covers_all_platform_and_language_checks(self) -> None:
+        self.assertIn("name: Validate Release", WORKFLOW)
+        self.assertIn("needs: [fmt, clippy, test, test-npm, test-python, build-artifacts]", WORKFLOW)
+        self.assertIn("if: always() && github.event_name == 'pull_request'", WORKFLOW)
+
     def test_artifact_builds_are_validated_before_merge(self) -> None:
         build = WORKFLOW.split("  build-artifacts:", 1)[1].split("  create-release:", 1)[0]
         self.assertIn("github.event_name == 'pull_request'", build)
@@ -27,7 +37,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         for source in [WORKFLOW, (root / ".github/workflows/dependabot-merge.yml").read_text()]:
             self.assertIn("uses: actions/create-github-app-token@v2", source)
             self.assertIn("repositories: ${{ github.event.repository.name }}", source)
-            self.assertIn("token: ${{ steps.writer.outputs.token }}", source)
+            self.assertIn("steps.writer.outputs.token", source)
 
     def test_existing_packages_require_verified_identity(self) -> None:
         self.assertNotIn("skip-existing: true", WORKFLOW)

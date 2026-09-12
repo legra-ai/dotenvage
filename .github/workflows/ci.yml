@@ -176,6 +176,7 @@ jobs:
         with:
           fetch-depth: 0
       - uses: actions/create-github-app-token@v2
+        if: github.event_name != 'pull_request'
         id: writer
         with:
           app-id: ${{ secrets.RELEASE_WRITER_APP_ID }}
@@ -186,7 +187,7 @@ jobs:
         id: version
         uses: legra-ai/github-actions/.github/actions/prepare-cargo-release@main
         with:
-          token: ${{ steps.writer.outputs.token }}
+          token: ${{ github.event_name == 'pull_request' && github.token || steps.writer.outputs.token }}
 
   # Build all artifacts BEFORE creating release
   # This ensures we don't create a release if builds fail
@@ -371,6 +372,25 @@ jobs:
           path: python/dist/*.whl
           retention-days: 7
           if-no-files-found: error
+
+  validate:
+    name: Validate Release
+    if: always() && github.event_name == 'pull_request'
+    needs: [fmt, clippy, test, test-npm, test-python, build-artifacts]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every validation and platform build
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYTHON'
+          import json
+          import os
+          failed = {name: job["result"] for name, job in json.loads(os.environ["JOB_RESULTS"]).items()
+                    if job["result"] != "success"}
+          if failed:
+              raise SystemExit(f"Release validation failed: {failed}")
+          PYTHON
 
   # Create release ONLY after all builds succeed
   create-release:
