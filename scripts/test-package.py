@@ -17,6 +17,9 @@ def main():
     ).splitlines()
     if not tests:
         raise ValueError("The published crate must contain integration tests")
+    examples = subprocess.check_output(
+        ["git", "ls-files", "examples/*.rs"], cwd=root, text=True
+    ).splitlines()
     with tempfile.TemporaryDirectory(prefix="dotenvage-package-") as directory:
         target = Path(directory)
         subprocess.run(
@@ -25,7 +28,7 @@ def main():
         )
         with tarfile.open(target / "package" / f"{stem}.crate") as archive:
             members = set(archive.getnames())
-            for name in [*tests, "LICENSE-MIT", "LICENSE-APACHE"]:
+            for name in [*tests, *examples, "LICENSE-MIT", "LICENSE-APACHE"]:
                 if f"{stem}/{name}" not in members:
                     raise ValueError(f"Published archive omits {name}")
             for name in ["build.rs", ".cargo/config.toml"]:

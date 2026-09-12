@@ -29,6 +29,7 @@ publish = true
 include = [
     "src/**",
     "tests/*.rs",
+    "examples/*.rs",
     "Cargo.toml",
     "Cargo.lock",
     "README.md",
