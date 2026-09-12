@@ -15,7 +15,7 @@ When needed, `cargo version-info` updates Rust manifests and lockfiles and runs
 the configured companion-version hook for npm, Python and the root package.
 GitHub records one verified version commit, guarded by the expected main SHA.
 All downstream checks, builds and publishers check out that exact revision.
-The version commit's bot push does not start another release pipeline.
+The release-writer App's push starts main CI, which resumes at that revision.
 
 ## Validation and publication
 
@@ -28,8 +28,11 @@ becomes public only after all publishers succeed.
 Publication is not an atomic transaction across registries. A partially completed
 release is retried at its original tagged revision before preparing a newer one.
 Crates.io retries verify the published package's source revision; conflicting
-tags or crate revisions fail. Existing npm versions and Python wheels use their
-publishers' existing duplicate handling. Never move a tag to bypass a failure.
+tags or crate revisions fail. Before the first registry upload, an immutable `release-packages.zip` asset
+stores the npm tarball, five Python wheels, source revision and SHA-256 hashes.
+Retries reuse those original bytes even when a rebuild differs. Existing npm
+versions must match the tarball's SHA-512 integrity; existing Python wheels
+must match their SHA-256 hashes. Only missing packages are uploaded. Never move a tag to bypass a failure.
 
 ## Credentials and recovery
 
@@ -37,8 +40,10 @@ publishers' existing duplicate handling. Never move a tag to bypass a failure.
 - npm and PyPI trusted publishers must authorize this repository and `ci.yml`.
 - The `pypi` environment is used for publication and must not require a human
   approval if unattended release is required.
-- Version preparation and release jobs need contents write permission;
-  publication also needs id-token write permission for trusted publishing.
+- `RELEASE_WRITER_APP_ID` and `RELEASE_WRITER_APP_KEY` mint repository-scoped
+  App tokens for version writes and dependency merges. Main rules authorize
+  that App while preserving code-owner review for outside contributors.
+- Publication needs contents write and id-token write permissions.
 
 Daily scheduled runs and manual `gh workflow run ci.yml --ref main` use the same
 recovery path. Never invoke a second publisher to repair a failed release.

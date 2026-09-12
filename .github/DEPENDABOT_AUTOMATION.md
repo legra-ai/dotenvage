@@ -10,10 +10,9 @@ same-repository Dependabot PRs targeting main, whose current head SHA is the
 successfully tested SHA, can be squash-merged. Major updates use the same gate:
 there is no unconditional approval or manual version-size exception.
 
-After merging, the handler explicitly dispatches `ci.yml` on main. This is
-necessary because pushes made with `GITHUB_TOKEN` do not trigger another push
-workflow. The handler needs contents, pull-requests and actions write permission;
-the PR test jobs do not receive registry credentials.
+The handler mints a repository-scoped release-writer App token. Its merge
+starts main CI automatically. The workflow's built-in token has read-only
+contents permission; the PR test jobs do not receive registry credentials.
 
 Main CI owns version preparation and publication for every releasable change,
 not just dependency updates. See [Publishing](PUBLISH.md). Daily main CI also

@@ -12,6 +12,16 @@ WORKFLOW = (
 class ReleaseWorkflowTests(unittest.TestCase):
     """Keep publishing and validation attached to one immutable revision."""
 
+    def test_artifact_builds_are_validated_before_merge(self) -> None:
+        build = WORKFLOW.split("  build-artifacts:", 1)[1].split("  create-release:", 1)[0]
+        self.assertIn("github.event_name == 'pull_request'", build)
+        publish = WORKFLOW.split("  create-release:", 1)[1].split("  publish-all:", 1)[0]
+        self.assertIn("if: needs.version-check.outputs.version_changed == 'true'", publish)
+
+    def test_packaged_crate_is_validated(self) -> None:
+        self.assertIn("python3 scripts/test-package.py", WORKFLOW)
+        self.assertIn("cargo doc --locked --no-deps --all-features", WORKFLOW)
+
     def test_writers_use_scoped_app_tokens(self) -> None:
         root = Path(__file__).parents[1]
         for source in [WORKFLOW, (root / ".github/workflows/dependabot-merge.yml").read_text()]:

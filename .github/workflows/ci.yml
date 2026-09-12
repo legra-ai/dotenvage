@@ -80,9 +80,16 @@ jobs:
           ref: ${{ needs.version-check.outputs.revision }}
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Run tests
-        run: cargo test
+        run: cargo test --locked
       - name: Run doc tests
-        run: cargo test --doc
+        run: cargo test --locked --doc
+
+      - name: Test published crate archive
+        if: runner.os == 'Linux'
+        run: python3 scripts/test-package.py
+      - name: Check documentation
+        if: runner.os == 'Linux'
+        run: cargo doc --locked --no-deps --all-features
 
   # Run npm tests
   test-npm:
@@ -187,7 +194,7 @@ jobs:
     name: Build Artifacts
     runs-on: ${{ matrix.platform.os }}
     needs: [fmt, clippy, test, test-npm, test-python, version-check]
-    if: needs.version-check.outputs.version_changed == 'true'
+    if: github.event_name == 'pull_request' || needs.version-check.outputs.version_changed == 'true'
     strategy:
       matrix:
         platform:
@@ -367,6 +374,7 @@ jobs:
 
   # Create release ONLY after all builds succeed
   create-release:
+    if: needs.version-check.outputs.version_changed == 'true'
     name: Create Release
     runs-on: ubuntu-latest
     needs: [build-artifacts, version-check]
