@@ -26,19 +26,15 @@ documentation = "https://docs.rs/dotenvage"
 homepage = "https://github.com/legra-ai/dotenvage"
 publish = true
 
-exclude = [
-    ".cargo/",
-    ".clippy.toml",
-    ".cursor/",
-    ".github/",
-    ".gitignore",
-    ".rust-toolchain.toml",
-    ".vscode/",
-    "CONTRIBUTING.md",
-    "cog.toml",
-    "rustfmt.toml",
-    "scripts/",
-    "npm/",
+include = [
+    "src/**",
+    "tests/*.rs",
+    "examples/*.rs",
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
 ]
 
 [lib]

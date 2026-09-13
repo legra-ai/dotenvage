@@ -1,4 +1,4 @@
-"""Regression tests for the release workflow's tag-creation contract."""
+"""Regression tests for the single tested-revision release contract."""
 
 from pathlib import Path
 import unittest
@@ -10,13 +10,70 @@ WORKFLOW = (
 
 
 class ReleaseWorkflowTests(unittest.TestCase):
-    """Protect release tagging from GitHub App workflow-scope rejection."""
+    """Keep publishing and validation attached to one immutable revision."""
 
-    def test_release_api_creates_the_remote_tag(self) -> None:
-        """The release API must create the tag instead of a Git push."""
+    def test_fork_pr_validation_does_not_require_app_secrets(self) -> None:
+        prepare = WORKFLOW.split("  version-check:", 1)[1].split("  build-artifacts:", 1)[0]
+        self.assertIn("if: github.event_name != 'pull_request'", prepare)
+        self.assertIn("github.event_name == 'pull_request' && github.token", prepare)
+
+    def test_required_gate_covers_all_platform_and_language_checks(self) -> None:
+        self.assertIn("name: Validate Release", WORKFLOW)
+        self.assertIn("needs: [fmt, clippy, test, test-npm, test-python, build-artifacts]", WORKFLOW)
+        self.assertIn("if: always() && github.event_name == 'pull_request'", WORKFLOW)
+
+    def test_artifact_builds_are_validated_before_merge(self) -> None:
+        build = WORKFLOW.split("  build-artifacts:", 1)[1].split("  create-release:", 1)[0]
+        self.assertIn("github.event_name == 'pull_request'", build)
+        publish = WORKFLOW.split("  create-release:", 1)[1].split("  publish-all:", 1)[0]
+        self.assertIn("if: needs.version-check.outputs.version_changed == 'true'", publish)
+
+    def test_packaged_crate_is_validated(self) -> None:
+        self.assertIn("python3 scripts/test-package.py", WORKFLOW)
+        self.assertIn("cargo doc --locked --no-deps --all-features", WORKFLOW)
+
+    def test_writers_use_scoped_app_tokens(self) -> None:
+        root = Path(__file__).parents[1]
+        for source in [WORKFLOW, (root / ".github/workflows/dependabot-merge.yml").read_text()]:
+            self.assertIn("uses: actions/create-github-app-token@v2", source)
+            self.assertIn("repositories: ${{ github.event.repository.name }}", source)
+            self.assertIn("steps.writer.outputs.token", source)
+
+    def test_existing_packages_require_verified_identity(self) -> None:
+        self.assertNotIn("skip-existing: true", WORKFLOW)
+        self.assertNotIn("EPUBLISHCONFLICT", WORKFLOW)
+        for command in ["stage", "check-npm", "filter-python", "verify-python"]:
+            self.assertIn(f"python3 scripts/release-packages.py {command}", WORKFLOW)
+
+    def test_tag_and_release_use_the_prepared_revision(self) -> None:
+        """The triggering SHA is not the generated and validated version commit."""
         self.assertNotIn("      - name: Push Release Tag\n", WORKFLOW)
-        self.assertNotIn('git push origin "v$VERSION"', WORKFLOW)
-        self.assertIn("          target_commitish: ${{ github.sha }}\n", WORKFLOW)
+        self.assertIn("legra-ai/github-actions/.github/actions/tag-tested-release@main", WORKFLOW)
+        self.assertNotIn("target_commitish: ${{ github.sha }}", WORKFLOW)
+        self.assertIn("target_commitish: ${{ needs.version-check.outputs.revision }}", WORKFLOW)
+
+    def test_old_parallel_publish_workflows_are_removed(self) -> None:
+        workflows = Path(__file__).parents[1] / ".github/workflows"
+        for name in ["auto-version-bump.yml", "dependabot-auto-merge.yml",
+                     "dependabot-approve.yml", "dependabot-automerge.yml"]:
+            self.assertFalse((workflows / name).exists(), name)
+
+    def test_release_remains_draft_until_all_registries_finish(self) -> None:
+        self.assertIn("draft: true", WORKFLOW)
+        self.assertLess(WORKFLOW.index("name: Publish to PyPI"),
+                        WORKFLOW.index("name: Complete release after all registries succeed"))
+
+    def test_workflow_contract_tests_run_in_ci(self) -> None:
+        self.assertIn("python3 -m unittest discover -s tests -p test_release_workflow.py", WORKFLOW)
+
+    def test_ci_and_hooks_use_the_same_pinned_formatter(self) -> None:
+        root = Path(__file__).parents[1]
+        self.assertRegex((root / "rustfmt-toolchain").read_text().strip(),
+                         r"^nightly-\d{4}-\d{2}-\d{2}$")
+        self.assertIn("./scripts/fmt.sh --check", WORKFLOW)
+        self.assertIn("./scripts/fmt.sh --check", (root / ".githooks/pre-commit").read_text())
+        self.assertIn("toolchain: ${{ steps.formatter.outputs.toolchain }}", WORKFLOW)
+        self.assertNotIn("cargo +nightly", WORKFLOW)
 
 
 if __name__ == "__main__":
