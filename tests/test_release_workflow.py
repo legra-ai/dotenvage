@@ -45,6 +45,12 @@ class ReleaseWorkflowTests(unittest.TestCase):
         for command in ["stage", "check-npm", "filter-python", "verify-python"]:
             self.assertIn(f"python3 scripts/release-packages.py {command}", WORKFLOW)
 
+    def test_tag_checkout_uses_the_authorized_release_writer(self) -> None:
+        job = WORKFLOW.split("  create-release:", 1)[1].split("  publish-all:", 1)[0]
+        self.assertIn("uses: actions/create-github-app-token@v2", job)
+        self.assertIn("token: ${{ steps.writer.outputs.token }}", job)
+        self.assertLess(job.index("id: writer"), job.index("uses: actions/checkout@v7"))
+
     def test_tag_and_release_use_the_prepared_revision(self) -> None:
         """The triggering SHA is not the generated and validated version commit."""
         self.assertNotIn("      - name: Push Release Tag\n", WORKFLOW)

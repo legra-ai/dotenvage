@@ -401,11 +401,18 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: writer
+        with:
+          app-id: ${{ secrets.RELEASE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_WRITER_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ needs.version-check.outputs.revision }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.writer.outputs.token }}
 
       - name: Create Release Tag
         uses: legra-ai/github-actions/.github/actions/tag-tested-release@main
