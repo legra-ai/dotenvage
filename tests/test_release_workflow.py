@@ -1,6 +1,7 @@
 """Regression tests for the single tested-revision release contract."""
 
 from pathlib import Path
+import re
 import unittest
 
 
@@ -44,6 +45,13 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("EPUBLISHCONFLICT", WORKFLOW)
         for command in ["stage", "check-npm", "filter-python", "verify-python"]:
             self.assertIn(f"python3 scripts/release-packages.py {command}", WORKFLOW)
+
+    def test_writer_action_version_is_consistent_across_jobs(self) -> None:
+        root = Path(__file__).parents[1]
+        merge = (root / ".github/workflows/dependabot-merge.yml").read_text()
+        versions = re.findall(r"uses: actions/create-github-app-token@(\S+)", WORKFLOW + merge)
+        self.assertTrue(versions)
+        self.assertEqual(len(set(versions)), 1, versions)
 
     def test_release_creation_uses_the_authorized_writer(self) -> None:
         create = WORKFLOW.split("  create-release:\n", 1)[1].split("  publish-all:\n", 1)[0]
