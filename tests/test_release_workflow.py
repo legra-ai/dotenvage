@@ -35,7 +35,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_writers_use_scoped_app_tokens(self) -> None:
         root = Path(__file__).parents[1]
         for source in [WORKFLOW, (root / ".github/workflows/dependabot-merge.yml").read_text()]:
-            self.assertIn("uses: actions/create-github-app-token@v2", source)
+            self.assertIn("uses: actions/create-github-app-token@", source)
             self.assertIn("repositories: ${{ github.event.repository.name }}", source)
             self.assertIn("steps.writer.outputs.token", source)
 
@@ -44,6 +44,24 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("EPUBLISHCONFLICT", WORKFLOW)
         for command in ["stage", "check-npm", "filter-python", "verify-python"]:
             self.assertIn(f"python3 scripts/release-packages.py {command}", WORKFLOW)
+
+    def test_release_creation_uses_the_authorized_writer(self) -> None:
+        create = WORKFLOW.split("  create-release:\n", 1)[1].split("  publish-all:\n", 1)[0]
+        self.assertIn("repositories: ${{ github.event.repository.name }}", create)
+        self.assertLess(create.index("id: writer"), create.index("uses: actions/checkout@"))
+        self.assertIn("token: ${{ steps.writer.outputs.token }}", create)
+        upload = create.split("      - name: Create GitHub Release\n", 1)[1]
+        self.assertIn("token: ${{ steps.writer.outputs.token }}", upload)
+        self.assertNotIn("secrets.GITHUB_TOKEN", create)
+
+    def test_release_recovery_and_completion_use_the_authorized_writer(self) -> None:
+        publish = WORKFLOW.split("  publish-all:\n", 1)[1]
+        self.assertIn("repositories: ${{ github.event.repository.name }}", publish)
+        writer = publish.index("id: writer")
+        recovery = publish.index("name: Preserve original package archives for recovery")
+        self.assertLess(writer, recovery)
+        self.assertIn("GH_TOKEN: ${{ steps.writer.outputs.token }}", publish)
+        self.assertNotIn("GH_TOKEN: ${{ github.token }}", publish)
 
     def test_tag_and_release_use_the_prepared_revision(self) -> None:
         """The triggering SHA is not the generated and validated version commit."""

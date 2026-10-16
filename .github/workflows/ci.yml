@@ -401,11 +401,18 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: writer
+        with:
+          app-id: ${{ secrets.RELEASE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_WRITER_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ needs.version-check.outputs.revision }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.writer.outputs.token }}
 
       - name: Create Release Tag
         uses: legra-ai/github-actions/.github/actions/tag-tested-release@main
@@ -435,6 +442,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
+          token: ${{ steps.writer.outputs.token }}
           tag_name: v${{ needs.version-check.outputs.new_version }}
           name: v${{ needs.version-check.outputs.new_version }}
           target_commitish: ${{ needs.version-check.outputs.revision }}
@@ -444,8 +452,6 @@ jobs:
           files: |
             release-artifacts/*.zip
             release-artifacts/*.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Release Summary
         run: |
@@ -459,7 +465,6 @@ jobs:
     needs: [create-release, version-check]
     environment: pypi  # Required for PyPI Trusted Publishing
     env:
-      GH_TOKEN: ${{ github.token }}
       RELEASE_VERSION: ${{ needs.version-check.outputs.new_version }}
       RELEASE_REVISION: ${{ needs.version-check.outputs.revision }}
     permissions:
@@ -573,7 +578,17 @@ jobs:
             exit 1
           fi
 
+      - uses: actions/create-github-app-token@v2
+        id: writer
+        with:
+          app-id: ${{ secrets.RELEASE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_WRITER_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
       - name: Preserve original package archives for recovery
+        env:
+          GH_TOKEN: ${{ steps.writer.outputs.token }}
         run: python3 scripts/release-packages.py stage
 
       - name: Publish to crates.io
@@ -613,7 +628,7 @@ jobs:
 
       - name: Complete release after all registries succeed
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.writer.outputs.token }}
           RELEASE_VERSION: ${{ needs.version-check.outputs.new_version }}
         run: gh release edit "v$RELEASE_VERSION" --draft=false
 
