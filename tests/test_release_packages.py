@@ -3,9 +3,13 @@
 import base64
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
+import shlex
+import subprocess
+import tarfile
 import tempfile
 import zipfile
 import unittest
@@ -39,6 +43,29 @@ class RegistryTests(unittest.TestCase):
     def test_missing_npm_package_needs_publication(self):
         with patch.object(release, "registry_json", return_value=None):
             self.assertFalse(release.npm_exists("1.2.3", self.package))
+
+    def test_workflow_publishes_a_local_archive_instead_of_a_git_shorthand(self):
+        root = self.package.parent
+        archive = root / "release-packages" / "dotenvage-node-1.2.3.tgz"
+        archive.parent.mkdir()
+        manifest = json.dumps({"name": "@dotenvage/release-path-test", "version": "1.2.3"}).encode()
+        with tarfile.open(archive, "w:gz") as package:
+            info = tarfile.TarInfo("package/package.json")
+            info.size = len(manifest)
+            package.addfile(info, io.BytesIO(manifest))
+        workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text()
+        command = next(line.strip().removeprefix("run: ") for line in workflow.splitlines()
+                       if line.strip().startswith("run: npm publish "))
+        arguments = [argument.replace("$GITHUB_WORKSPACE", str(root)).replace(
+                         "$NPM_ARCHIVE", str(archive.relative_to(root)))
+                     for argument in shlex.split(command) if argument != "--provenance"]
+        result = subprocess.run(
+            [*arguments, "--dry-run", "--offline", "--json"], cwd=root,
+            env={**os.environ, "npm_config_cache": str(root / "npm-cache")},
+            text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout)["name"], "@dotenvage/release-path-test")
 
     def test_registry_only_treats_404_as_absent(self):
         for code in [401, 403, 429, 500]:
