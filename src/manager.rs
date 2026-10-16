@@ -1427,7 +1427,8 @@ mod tests {
         let orig_xdg_state = std::env::var("XDG_STATE_HOME").ok();
         let orig_xdg_config = std::env::var("XDG_CONFIG_HOME").ok();
 
-        // Test without AGE_KEY_NAME - should default to CARGO_PKG_NAME/dotenvage
+        // Test without AGE_KEY_NAME - should default to
+        // CARGO_PKG_NAME/dotenvage
         unsafe {
             std::env::remove_var("AGE_KEY_NAME");
             std::env::remove_var("XDG_CONFIG_HOME"); // Clear any XDG_CONFIG_HOME

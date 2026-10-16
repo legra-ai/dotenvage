@@ -16,9 +16,9 @@ if [ -z "$RUST_FILES" ]; then
     exit 0
 fi
 
-echo "Running cargo fmt --check..."
-if ! cargo fmt -- --check; then
-    echo "Format check failed. Run: cargo fmt"
+echo "Running ./scripts/fmt.sh --check..."
+if ! ./scripts/fmt.sh --check; then
+    echo "Format check failed. Run: ./scripts/fmt.sh"
     exit 1
 fi
 

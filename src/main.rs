@@ -349,8 +349,8 @@ async fn edit(file: PathBuf) -> Result<()> {
     let mut keys_to_encrypt = Vec::new();
     for (key, value) in &mut vars {
         if SecretManager::is_encrypted(value) {
-            // Don't track AGE key variables for re-encryption - they should remain
-            // plaintext
+            // Don't track AGE key variables for re-encryption - they should
+            // remain plaintext
             if !AutoDetectPatterns::is_age_key_variable(key) {
                 keys_to_encrypt.push(key.clone());
             }
@@ -383,8 +383,8 @@ async fn edit(file: PathBuf) -> Result<()> {
     }
     let mut edited_vars = parse_env_file(&edited)?;
     for key in &keys_to_encrypt {
-        // Double-check: never encrypt AGE key variables (shouldn't be in list, but be
-        // safe)
+        // Double-check: never encrypt AGE key variables (shouldn't be in list,
+        // but be safe)
         if AutoDetectPatterns::is_age_key_variable(key) {
             continue;
         }

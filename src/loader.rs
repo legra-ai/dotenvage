@@ -709,9 +709,10 @@ impl EnvLoader {
         let user = Self::resolve_user();
         let variant = Self::resolve_variant();
 
-        // Generate power set: all combinations of [env, os, arch, user, variant]
-        // We use a bitmask approach: 5 bits for 5 optional values
-        // Bit 0 = ENV, Bit 1 = OS, Bit 2 = ARCH, Bit 3 = USER, Bit 4 = VARIANT
+        // Generate power set: all combinations of [env, os, arch, user,
+        // variant] We use a bitmask approach: 5 bits for 5 optional
+        // values Bit 0 = ENV, Bit 1 = OS, Bit 2 = ARCH, Bit 3 = USER,
+        // Bit 4 = VARIANT
         for mask in 1..32 {
             // mask from 1 to 31 (excluding 0 which is just .env)
             let mut parts = Vec::new();
@@ -1380,7 +1381,8 @@ impl EnvLoader {
                 continue;
             }
 
-            // Skip encrypted values - we can't decrypt them without a SecretManager
+            // Skip encrypted values - we can't decrypt them without a
+            // SecretManager
             if SecretManager::is_encrypted(value) {
                 continue;
             }
@@ -1599,7 +1601,8 @@ impl EnvLoader {
                     .filter(|s| !s.is_empty())
             })
             .or_else(|| {
-                // Parse TARGET triple (e.g., "x86_64-unknown-linux-gnu" → "x86_64")
+                // Parse TARGET triple (e.g., "x86_64-unknown-linux-gnu" →
+                // "x86_64")
                 std::env::var("TARGET")
                     .ok()
                     .filter(|s| !s.is_empty())
@@ -1670,7 +1673,8 @@ impl EnvLoader {
                     .filter(|s| !s.is_empty())
             })
             .or_else(|| {
-                // Parse TARGET triple (e.g., "x86_64-unknown-linux-gnu" → "linux")
+                // Parse TARGET triple (e.g., "x86_64-unknown-linux-gnu" →
+                // "linux")
                 std::env::var("TARGET")
                     .ok()
                     .filter(|s| !s.is_empty())

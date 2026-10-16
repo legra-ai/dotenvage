@@ -369,7 +369,8 @@ async fn collect_vars_chained_discovery() {
         .await
         .unwrap();
 
-    // Chain: .env sets ENV, .env.staging sets VARIANT, .env.staging.canary loads
+    // Chain: .env sets ENV, .env.staging sets VARIANT, .env.staging.canary
+    // loads
     write(tmp.path().join(".env"), "NODE_ENV=staging\nSTEP=1\n")
         .await
         .unwrap();
