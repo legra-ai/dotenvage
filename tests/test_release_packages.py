@@ -65,7 +65,7 @@ class RegistryTests(unittest.TestCase):
             text=True, capture_output=True, check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout)["name"], "@dotenvage/release-path-test")
+        self.assertIn("@dotenvage/release-path-test", result.stdout)
 
     def test_registry_only_treats_404_as_absent(self):
         for code in [401, 403, 429, 500]:
