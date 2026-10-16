@@ -607,7 +607,7 @@ jobs:
         if: steps.npm.outputs.npm_missing == 'true'
         env:
           NPM_ARCHIVE: ${{ steps.npm.outputs.npm_archive }}
-        run: npm publish "$NPM_ARCHIVE" --access public --provenance --ignore-scripts
+        run: npm publish "$GITHUB_WORKSPACE/$NPM_ARCHIVE" --access public --provenance --ignore-scripts
       - name: Verify npm publication
         id: npm-verified
         run: python3 scripts/release-packages.py check-npm
