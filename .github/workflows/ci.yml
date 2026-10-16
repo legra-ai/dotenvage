@@ -20,8 +20,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: rustfmt
-      - uses: dtolnay/rust-toolchain@nightly-2026-10-16
+      - uses: dtolnay/rust-toolchain@nightly
         with:
+          toolchain: nightly-2026-10-16
           components: rustfmt
       - name: Check formatting
         run: cargo +nightly-2026-10-16 fmt --all -- --check
@@ -78,8 +79,8 @@ jobs:
           cache-dependency-path: npm/pnpm-lock.yaml
       - name: Install Rust (for NAPI build)
         uses: actions-rust-lang/setup-rust-toolchain@v1
-          with:
-            toolchain: 1.99.1
+        with:
+          toolchain: 1.99.1
       - name: Install dependencies
         working-directory: npm
         run: pnpm install
@@ -107,8 +108,8 @@ jobs:
         run: uv python install ${{ matrix.python }}
       - name: Install Rust (for maturin build)
         uses: actions-rust-lang/setup-rust-toolchain@v1
-          with:
-            toolchain: 1.99.1
+        with:
+          toolchain: 1.99.1
       - name: Install dependencies
         working-directory: python
         run: uv sync --dev
@@ -171,8 +172,8 @@ jobs:
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
-          with:
-            toolchain: 1.99.1
+        with:
+          toolchain: 1.99.1
         with:
           target: ${{ matrix.platform.target }}
           cache: false  # Using Swatinem/rust-cache below for custom config
