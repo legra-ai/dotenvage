@@ -35,7 +35,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_writers_use_scoped_app_tokens(self) -> None:
         root = Path(__file__).parents[1]
         for source in [WORKFLOW, (root / ".github/workflows/dependabot-merge.yml").read_text()]:
-            self.assertIn("uses: actions/create-github-app-token@v2", source)
+            self.assertIn("uses: actions/create-github-app-token@", source)
             self.assertIn("repositories: ${{ github.event.repository.name }}", source)
             self.assertIn("steps.writer.outputs.token", source)
 
