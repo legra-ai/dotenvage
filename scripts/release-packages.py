@@ -124,15 +124,11 @@ def main():
             raise ValueError("Expected exactly one npm archive")
         output("npm_missing", str(not npm_exists(version, archives[0])).lower())
         output("npm_archive", str(archives[0]))
-    elif command in ("filter-python", "verify-python"):
+    elif command == "filter-python":
         wheels = sorted(directory.glob("*.whl"))
         if len(wheels) != 5:
             raise ValueError("Expected exactly five Python platform wheels")
         missing = missing_wheels(version, wheels)
-        if command == "verify-python":
-            if missing:
-                raise ValueError(f"PyPI release is incomplete: {[wheel.name for wheel in missing]}")
-            return
         pending = Path("pending-wheels")
         pending.mkdir()
         for wheel in missing:
