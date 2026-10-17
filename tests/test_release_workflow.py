@@ -13,6 +13,27 @@ WORKFLOW = (
 class ReleaseWorkflowTests(unittest.TestCase):
     """Keep publishing and validation attached to one immutable revision."""
 
+    def test_binding_publication_waits_for_verified_original_archives(self) -> None:
+        for title, registry, package in [('Verify npm publication', 'npm', '@dotenvage/node'),
+                                         ('Verify complete Python publication', 'pypi', 'dotenvage')]:
+            block = WORKFLOW.split(f'      - name: {title}\n', 1)[1].split('\n      - ', 1)[0]
+            self.assertRegex(block, r'uses: legra-ai/github-actions/\.github/actions/verify-registry-publication@[a-f0-9]{40}')
+            for value in [f'registry: {registry}', f"package: '{package}'" if registry == 'npm' else f'package: {package}',
+                          'version: ${{ needs.version-check.outputs.new_version }}',
+                          'revision: ${{ needs.version-check.outputs.revision }}',
+                          'archive: release-packages.zip']:
+                self.assertIn(value, block)
+        self.assertNotIn('name: Require published npm archive', WORKFLOW)
+
+    def test_shared_release_policy_is_pinned_consistently(self) -> None:
+        root = Path(__file__).parents[1]
+        merge = (root / '.github/workflows/dependabot-merge.yml').read_text()
+        references = re.findall(r'uses: legra-ai/github-actions/[^@\s]+@(\S+)', WORKFLOW + merge)
+        self.assertTrue(references)
+        self.assertEqual(len(set(references)), 1)
+        for reference in references:
+            self.assertRegex(reference, r'^[a-f0-9]{40}$')
+
     def test_fork_pr_validation_does_not_require_app_secrets(self) -> None:
         prepare = WORKFLOW.split("  version-check:", 1)[1].split("  build-artifacts:", 1)[0]
         self.assertIn("if: github.event_name != 'pull_request'", prepare)
@@ -43,7 +64,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_existing_packages_require_verified_identity(self) -> None:
         self.assertNotIn("skip-existing: true", WORKFLOW)
         self.assertNotIn("EPUBLISHCONFLICT", WORKFLOW)
-        for command in ["stage", "check-npm", "filter-python", "verify-python"]:
+        for command in ["stage", "check-npm", "filter-python"]:
             self.assertIn(f"python3 scripts/release-packages.py {command}", WORKFLOW)
 
     def test_writer_action_version_is_consistent_across_jobs(self) -> None:
@@ -74,7 +95,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_tag_and_release_use_the_prepared_revision(self) -> None:
         """The triggering SHA is not the generated and validated version commit."""
         self.assertNotIn("      - name: Push Release Tag\n", WORKFLOW)
-        self.assertIn("legra-ai/github-actions/.github/actions/tag-tested-release@main", WORKFLOW)
+        self.assertIn("legra-ai/github-actions/.github/actions/tag-tested-release@", WORKFLOW)
         self.assertNotIn("target_commitish: ${{ github.sha }}", WORKFLOW)
         self.assertIn("target_commitish: ${{ needs.version-check.outputs.revision }}", WORKFLOW)
 
