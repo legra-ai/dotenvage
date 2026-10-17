@@ -20,15 +20,7 @@ const path = require("node:path");
 const os = require("node:os");
 const { pathToFileURL } = require("node:url");
 
-let dotenvage;
-try {
-  dotenvage = require("../index.js");
-} catch {
-  console.warn(
-    'Skipping nextjs-integration tests — run "pnpm run build" first.'
-  );
-  process.exit(0);
-}
+const dotenvage = require("../index.js");
 
 describe("Next.js integration — __DOTENVAGE_LOADED sentinel", () => {
   let tmpDir;

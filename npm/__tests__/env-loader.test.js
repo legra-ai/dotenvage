@@ -5,16 +5,7 @@ const path = require("path");
 const { mkdtemp, writeFile, rm } = require("fs/promises");
 const os = require("os");
 
-// Skip tests if bindings not available
-let dotenvage;
-try {
-  dotenvage = require("../index.js");
-} catch (error) {
-  console.warn(
-    'Skipping tests - native bindings not available. Run "npm run build" first.'
-  );
-  process.exit(0);
-}
+const dotenvage = require("../index.js");
 
 describe("JsEnvLoader", () => {
   let testDir;

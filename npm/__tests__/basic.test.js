@@ -6,17 +6,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
 
-// Try to load the module (will fail if not built)
-let dotenvage;
-try {
-  dotenvage = require("../index.js");
-} catch (error) {
-  console.warn(
-    "Warning: Native bindings not available. Run 'npm run build' first."
-  );
-  console.warn("Skipping tests.");
-  process.exit(0);
-}
+const dotenvage = require("../index.js");
 
 test("SecretManager.generate() creates a new manager", () => {
   const manager = dotenvage.JsSecretManager.generate();

@@ -87,13 +87,7 @@ const {
   setupTestEnvironment,
 } = require("./test-utils");
 
-let dotenvage;
-try {
-  dotenvage = require("../index.js");
-} catch (error) {
-  console.warn("Skipping tests - native bindings not available.");
-  process.exit(0);
-}
+const dotenvage = require("../index.js");
 
 describe("My Feature", () => {
   let testDir;

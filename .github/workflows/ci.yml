@@ -45,6 +45,8 @@ jobs:
         run: python3 -m unittest discover -s tests -p test_release_workflow.py
       - name: Check interrupted package publication
         run: python3 -m unittest discover -s tests -p test_release_packages.py
+      - name: Require binding test failures when the native package cannot load
+        run: python3 -m unittest discover -s tests -p test_binding_failures.py
       - name: Install commit validator
         uses: legra-ai/github-actions/.github/actions/setup-cocogitto@e1594cd9f3a39586ab3f6f339801b6c7a3a0cf92
       - name: Check commit policy

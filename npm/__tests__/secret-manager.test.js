@@ -2,15 +2,7 @@ const { describe, it, before } = require("node:test");
 const assert = require("node:assert");
 
 // Skip tests if bindings not available (will be available after build)
-let dotenvage;
-try {
-  dotenvage = require("../index.js");
-} catch (error) {
-  console.warn(
-    'Skipping tests - native bindings not available. Run "npm run build" first.'
-  );
-  process.exit(0);
-}
+const dotenvage = require("../index.js");
 
 describe("JsSecretManager", () => {
   it("should generate a new secret manager", () => {
