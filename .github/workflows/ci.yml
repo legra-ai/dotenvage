@@ -195,6 +195,9 @@ jobs:
   # This ensures we don't create a release if builds fail
   build-artifacts:
     name: Build Artifacts
+    env:
+      CARGO_ZIGBUILD_ZIG_PATH: ${{ github.workspace }}/scripts/zig-cc.py
+      CARGO_ZIGBUILD_ZIG_COMMAND: ${{ github.workspace }}/scripts/zig-cc.py
     runs-on: ${{ matrix.platform.os }}
     needs: [fmt, clippy, test, test-npm, test-python, version-check]
     if: github.event_name == 'pull_request' || needs.version-check.outputs.version_changed == 'true'
@@ -241,7 +244,11 @@ jobs:
 
       - name: Install cargo-zigbuild
         if: matrix.platform.use_zig
-        run: pip install cargo-zigbuild
+        run: pip install cargo-zigbuild==0.23.4
+
+      - name: Test Zig linker argument contract
+        if: matrix.platform.use_zig
+        run: python3 -m unittest discover -s tests -p test_zig_linker.py
 
       - name: Free Disk Space (Ubuntu)
         if: ${{ matrix.platform.os == 'ubuntu-24.04' || matrix.platform.os == 'ubuntu-24.04-arm' }}
@@ -312,7 +319,7 @@ jobs:
             TARGET="${{ matrix.platform.target }}"
             ZIG_TARGET="${TARGET/unknown-/}"
             WRAPPER="/tmp/zig-cc-wrapper"
-            printf '#!/bin/sh\nexec zig cc -target %s.2.28 "$@"\n' "$ZIG_TARGET" > "$WRAPPER"
+            printf '#!/bin/sh\nexec "$GITHUB_WORKSPACE/scripts/zig-cc.py" cc -target %s.2.28 "$@"\n' "$ZIG_TARGET" > "$WRAPPER"
             chmod +x "$WRAPPER"
             ENV_TARGET=$(echo "$TARGET" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
             export "CARGO_TARGET_${ENV_TARGET}_LINKER=$WRAPPER"
