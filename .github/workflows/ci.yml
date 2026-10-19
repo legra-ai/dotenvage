@@ -248,7 +248,9 @@ jobs:
 
       - name: Test Zig linker argument contract
         if: matrix.platform.use_zig
-        run: python3 -m unittest discover -s tests -p test_zig_linker.py
+        run: |
+          python3 -m unittest discover -s tests -p test_zig_linker.py
+          python3 -m unittest discover -s tests -p test_glibc_requirement.py
 
       - name: Free Disk Space (Ubuntu)
         if: ${{ matrix.platform.os == 'ubuntu-24.04' || matrix.platform.os == 'ubuntu-24.04-arm' }}
@@ -342,14 +344,8 @@ jobs:
         if: matrix.platform.use_zig
         shell: bash
         run: |
-          echo "--- CLI binary ---"
-          objdump -T target/${{ matrix.platform.target }}/release/dotenvage \
-            | grep -oP 'GLIBC_\K[0-9.]+' | sort -Vu | tail -1
-          echo "--- NAPI .node ---"
-          for f in npm/*.node; do
-            [ -f "$f" ] && objdump -T "$f" \
-              | grep -oP 'GLIBC_\K[0-9.]+' | sort -Vu | tail -1
-          done
+          python3 scripts/verify-glibc.py --maximum 2.28 \
+            target/${{ matrix.platform.target }}/release/dotenvage npm/*.node
 
       # Build Python wheels
       # Skip aarch64-pc-windows-msvc: no ARM64 Windows runners, can't cross-compile Python
