@@ -19,6 +19,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  PNPM_VERSION: "12.14.0"
 
 jobs:
   # Check code formatting
@@ -108,7 +109,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 8
+          version: ${{ env.PNPM_VERSION }}
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -119,7 +120,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v2
       - name: Install dependencies
         working-directory: npm
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
       - name: Build NAPI bindings
         working-directory: npm
         run: pnpm run build
@@ -196,8 +197,8 @@ jobs:
   build-artifacts:
     name: Build Artifacts
     env:
-      CARGO_ZIGBUILD_ZIG_PATH: ${{ github.workspace }}/scripts/zig-cc.py
-      CARGO_ZIGBUILD_ZIG_COMMAND: ${{ github.workspace }}/scripts/zig-cc.py
+      CARGO_ZIGBUILD_ZIG_PATH: ${{ github.workspace }}/release-controls/scripts/zig-cc.py
+      CARGO_ZIGBUILD_ZIG_COMMAND: ${{ github.workspace }}/release-controls/scripts/zig-cc.py
     runs-on: ${{ matrix.platform.os }}
     needs: [fmt, clippy, test, test-npm, test-python, version-check]
     if: github.event_name == 'pull_request' || needs.version-check.outputs.version_changed == 'true'
@@ -224,6 +225,20 @@ jobs:
         with:
           ref: ${{ needs.version-check.outputs.revision }}
 
+      # Recovery validates the immutable tag with the executing workflow's controls.
+      - name: Checkout release controls
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: release-controls
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/workflows/ci.yml
+            /scripts/zig-cc.py
+            /scripts/verify-glibc.py
+            /tests/test_zig_linker.py
+            /tests/test_glibc_requirement.py
+
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
@@ -249,8 +264,8 @@ jobs:
       - name: Test Zig linker argument contract
         if: matrix.platform.use_zig
         run: |
-          python3 -m unittest discover -s tests -p test_zig_linker.py
-          python3 -m unittest discover -s tests -p test_glibc_requirement.py
+          python3 -m unittest discover -s release-controls/tests -p test_zig_linker.py
+          python3 -m unittest discover -s release-controls/tests -p test_glibc_requirement.py
 
       - name: Free Disk Space (Ubuntu)
         if: ${{ matrix.platform.os == 'ubuntu-24.04' || matrix.platform.os == 'ubuntu-24.04-arm' }}
@@ -305,14 +320,14 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 8
+          version: ${{ env.PNPM_VERSION }}
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version-file: ".nvmrc"
       - name: Install npm dependencies
         working-directory: npm
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
       - name: Build NAPI bindings
         working-directory: npm
         shell: bash
@@ -321,7 +336,7 @@ jobs:
             TARGET="${{ matrix.platform.target }}"
             ZIG_TARGET="${TARGET/unknown-/}"
             WRAPPER="/tmp/zig-cc-wrapper"
-            printf '#!/bin/sh\nexec "$GITHUB_WORKSPACE/scripts/zig-cc.py" cc -target %s.2.28 "$@"\n' "$ZIG_TARGET" > "$WRAPPER"
+            printf '#!/bin/sh\nexec "$GITHUB_WORKSPACE/release-controls/scripts/zig-cc.py" cc -target %s.2.28 "$@"\n' "$ZIG_TARGET" > "$WRAPPER"
             chmod +x "$WRAPPER"
             ENV_TARGET=$(echo "$TARGET" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
             export "CARGO_TARGET_${ENV_TARGET}_LINKER=$WRAPPER"
@@ -344,7 +359,7 @@ jobs:
         if: matrix.platform.use_zig
         shell: bash
         run: |
-          python3 scripts/verify-glibc.py --maximum 2.28 \
+          python3 release-controls/scripts/verify-glibc.py --maximum 2.28 \
             target/${{ matrix.platform.target }}/release/dotenvage npm/*.node
 
       # Build Python wheels
@@ -484,11 +499,7 @@ jobs:
       # Setup Rust for crates.io publish
       - uses: actions-rust-lang/setup-rust-toolchain@v2
 
-      # Setup Node.js/pnpm for npm publish
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-        with:
-          version: 8
+      # Setup Node.js for publishing the already-built npm package
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -550,9 +561,6 @@ jobs:
           find npm-artifacts -name "*.node" -type f -exec cp {} npm/ \;
           echo "Copied .node files to npm/ directory"
           ls -lh npm/*.node
-      - name: Install npm dependencies
-        working-directory: npm
-        run: pnpm install
       - name: Verify npm .node files
         working-directory: npm
         run: |

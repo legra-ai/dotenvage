@@ -29,10 +29,10 @@ class ZigLinkerTests(unittest.TestCase):
 
     def test_all_linux_builds_use_the_same_adapter(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
-        self.assertIn('CARGO_ZIGBUILD_ZIG_PATH: ${{ github.workspace }}/scripts/zig-cc.py', workflow)
-        self.assertIn('CARGO_ZIGBUILD_ZIG_COMMAND: ${{ github.workspace }}/scripts/zig-cc.py', workflow)
-        self.assertIn('exec "$GITHUB_WORKSPACE/scripts/zig-cc.py" cc', workflow)
-        self.assertIn('python3 -m unittest discover -s tests -p test_zig_linker.py', workflow)
+        self.assertIn('CARGO_ZIGBUILD_ZIG_PATH: ${{ github.workspace }}/release-controls/scripts/zig-cc.py', workflow)
+        self.assertIn('CARGO_ZIGBUILD_ZIG_COMMAND: ${{ github.workspace }}/release-controls/scripts/zig-cc.py', workflow)
+        self.assertIn('exec "$GITHUB_WORKSPACE/release-controls/scripts/zig-cc.py" cc', workflow)
+        self.assertIn('python3 -m unittest discover -s release-controls/tests -p test_zig_linker.py', workflow)
 
     @unittest.skipUnless(shutil.which('zig'), 'Zig is installed in Linux artifact jobs')
     def test_real_compiler_errors_still_fail(self):

@@ -38,10 +38,10 @@ class GlibcRequirementTests(unittest.TestCase):
     def test_workflow_gates_both_cli_and_napi(self):
         workflow = (ROOT / '.github/workflows/ci.yml').read_text()
         step = workflow.split('      - name: Verify glibc version requirement\n', 1)[1].split('\n      - ', 1)[0]
-        self.assertIn('python3 scripts/verify-glibc.py --maximum 2.28', step)
+        self.assertIn('python3 release-controls/scripts/verify-glibc.py --maximum 2.28', step)
         self.assertIn('target/${{ matrix.platform.target }}/release/dotenvage', step)
         self.assertIn('npm/*.node', step)
-        self.assertIn('python3 -m unittest discover -s tests -p test_glibc_requirement.py', workflow)
+        self.assertIn('python3 -m unittest discover -s release-controls/tests -p test_glibc_requirement.py', workflow)
 
 
 if __name__ == '__main__':
