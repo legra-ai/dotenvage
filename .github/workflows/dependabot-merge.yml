@@ -7,15 +7,18 @@ permissions:
   contents: read
 jobs:
   merge:
-    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      - uses: actions/create-github-app-token@v3
-        id: writer
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        id: merger
         with:
-          app-id: ${{ secrets.RELEASE_WRITER_APP_ID }}
-          private-key: ${{ secrets.RELEASE_WRITER_APP_KEY }}
+          app-id: ${{ secrets.RELEASE_MERGER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_MERGER_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-      - uses: legra-ai/github-actions/.github/actions/merge-tested-dependabot@e1594cd9f3a39586ab3f6f339801b6c7a3a0cf92
+      - uses: legra-ai/github-actions/.github/actions/merge-tested-dependabot@00130c0e1f52f67b9d267fe56d029827ce6dcd57
         with:
-          token: ${{ steps.writer.outputs.token }}
+          token: ${{ steps.merger.outputs.token }}
+          app-id: ${{ secrets.RELEASE_MERGER_APP_ID }}

@@ -13,6 +13,17 @@ WORKFLOW = (
 class ReleaseWorkflowTests(unittest.TestCase):
     """Keep publishing and validation attached to one immutable revision."""
 
+    def test_dependency_merger_cannot_reuse_the_release_writer(self) -> None:
+        root = Path(__file__).parents[1]
+        merge = (root / '.github/workflows/dependabot-merge.yml').read_text()
+        self.assertIn("if: github.event.workflow_run.conclusion == 'success'", merge)
+        self.assertIn('secrets.RELEASE_MERGER_APP_ID', merge)
+        self.assertIn('secrets.RELEASE_MERGER_APP_KEY', merge)
+        self.assertIn('token: ${{ steps.merger.outputs.token }}', merge)
+        self.assertNotIn('RELEASE_WRITER', merge)
+        action = merge.split('uses: legra-ai/github-actions/.github/actions/merge-tested-dependabot@', 1)[1]
+        self.assertIn('app-id: ${{ secrets.RELEASE_MERGER_APP_ID }}', action)
+
     def test_binding_publication_waits_for_verified_original_archives(self) -> None:
         for title, registry, package in [('Verify npm publication', 'npm', '@dotenvage/node'),
                                          ('Verify complete Python publication', 'pypi', 'dotenvage')]:
@@ -28,7 +39,8 @@ class ReleaseWorkflowTests(unittest.TestCase):
     def test_shared_release_policy_is_pinned_consistently(self) -> None:
         root = Path(__file__).parents[1]
         merge = (root / '.github/workflows/dependabot-merge.yml').read_text()
-        references = re.findall(r'uses: legra-ai/github-actions/[^@\s]+@(\S+)', WORKFLOW + merge)
+        title = (root / '.github/workflows/conventional-commits.yml').read_text()
+        references = re.findall(r'uses: legra-ai/github-actions/[^@\s]+@(\S+)', WORKFLOW + merge + title)
         self.assertTrue(references)
         self.assertEqual(len(set(references)), 1)
         for reference in references:
@@ -56,10 +68,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
 
     def test_writers_use_scoped_app_tokens(self) -> None:
         root = Path(__file__).parents[1]
-        for source in [WORKFLOW, (root / ".github/workflows/dependabot-merge.yml").read_text()]:
+        merger = (root / ".github/workflows/dependabot-merge.yml").read_text()
+        for source, identity in [(WORKFLOW, 'writer'), (merger, 'merger')]:
             self.assertIn("uses: actions/create-github-app-token@", source)
             self.assertIn("repositories: ${{ github.event.repository.name }}", source)
-            self.assertIn("steps.writer.outputs.token", source)
+            self.assertIn(f"steps.{identity}.outputs.token", source)
 
     def test_existing_packages_require_verified_identity(self) -> None:
         self.assertNotIn("skip-existing: true", WORKFLOW)
