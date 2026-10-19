@@ -11,5 +11,4 @@ protocol = "sparse"
 git-fetch-with-cli = true
 
 [env]
-RHUSKY_REPOSITORY_ROOT = { value = ".", relative = true, force = true }
 RUST_TEST_THREADS = "1"

@@ -48,7 +48,7 @@ jobs:
       - name: Require binding test failures when the native package cannot load
         run: python3 -m unittest discover -s tests -p test_binding_failures.py
       - name: Install commit validator
-        uses: legra-ai/github-actions/.github/actions/setup-cocogitto@8f56349fbf11b804d3f04bfb313d781dbd07da22
+        uses: legra-ai/github-actions/.github/actions/setup-cocogitto@b43be320c2c8e9a59152d08930e651e592ebd57f
       - name: Check commit policy
         run: python3 scripts/test-commit-policy.py
 
@@ -187,7 +187,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
       - name: Prepare validated release revision
         id: version
-        uses: legra-ai/github-actions/.github/actions/prepare-cargo-release@8f56349fbf11b804d3f04bfb313d781dbd07da22
+        uses: legra-ai/github-actions/.github/actions/prepare-cargo-release@b43be320c2c8e9a59152d08930e651e592ebd57f
         with:
           token: ${{ github.event_name == 'pull_request' && github.token || steps.writer.outputs.token }}
 
@@ -195,6 +195,9 @@ jobs:
   # This ensures we don't create a release if builds fail
   build-artifacts:
     name: Build Artifacts
+    env:
+      CARGO_ZIGBUILD_ZIG_PATH: ${{ github.workspace }}/scripts/zig-cc.py
+      CARGO_ZIGBUILD_ZIG_COMMAND: ${{ github.workspace }}/scripts/zig-cc.py
     runs-on: ${{ matrix.platform.os }}
     needs: [fmt, clippy, test, test-npm, test-python, version-check]
     if: github.event_name == 'pull_request' || needs.version-check.outputs.version_changed == 'true'
@@ -241,7 +244,11 @@ jobs:
 
       - name: Install cargo-zigbuild
         if: matrix.platform.use_zig
-        run: pip install cargo-zigbuild
+        run: pip install cargo-zigbuild==0.23.4
+
+      - name: Test Zig linker argument contract
+        if: matrix.platform.use_zig
+        run: python3 -m unittest discover -s tests -p test_zig_linker.py
 
       - name: Free Disk Space (Ubuntu)
         if: ${{ matrix.platform.os == 'ubuntu-24.04' || matrix.platform.os == 'ubuntu-24.04-arm' }}
@@ -312,7 +319,7 @@ jobs:
             TARGET="${{ matrix.platform.target }}"
             ZIG_TARGET="${TARGET/unknown-/}"
             WRAPPER="/tmp/zig-cc-wrapper"
-            printf '#!/bin/sh\nexec zig cc -target %s.2.28 "$@"\n' "$ZIG_TARGET" > "$WRAPPER"
+            printf '#!/bin/sh\nexec "$GITHUB_WORKSPACE/scripts/zig-cc.py" cc -target %s.2.28 "$@"\n' "$ZIG_TARGET" > "$WRAPPER"
             chmod +x "$WRAPPER"
             ENV_TARGET=$(echo "$TARGET" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
             export "CARGO_TARGET_${ENV_TARGET}_LINKER=$WRAPPER"
@@ -417,13 +424,13 @@ jobs:
           token: ${{ steps.writer.outputs.token }}
 
       - name: Create Release Tag
-        uses: legra-ai/github-actions/.github/actions/tag-tested-release@8f56349fbf11b804d3f04bfb313d781dbd07da22
+        uses: legra-ai/github-actions/.github/actions/tag-tested-release@b43be320c2c8e9a59152d08930e651e592ebd57f
         with:
           version: ${{ needs.version-check.outputs.new_version }}
           revision: ${{ needs.version-check.outputs.revision }}
 
       - name: Generate Changelog
-        uses: legra-ai/github-actions/.github/actions/generate-changelog@8f56349fbf11b804d3f04bfb313d781dbd07da22
+        uses: legra-ai/github-actions/.github/actions/generate-changelog@b43be320c2c8e9a59152d08930e651e592ebd57f
         with:
           revision: ${{ needs.version-check.outputs.revision }}
           output-file: CHANGELOG_RELEASE.md
@@ -594,7 +601,7 @@ jobs:
         run: python3 scripts/release-packages.py stage
 
       - name: Publish to crates.io
-        uses: legra-ai/github-actions/.github/actions/publish-tested-crate@8f56349fbf11b804d3f04bfb313d781dbd07da22
+        uses: legra-ai/github-actions/.github/actions/publish-tested-crate@b43be320c2c8e9a59152d08930e651e592ebd57f
         with:
           crate: dotenvage
           version: ${{ needs.version-check.outputs.new_version }}
@@ -611,7 +618,7 @@ jobs:
           NPM_ARCHIVE: ${{ steps.npm.outputs.npm_archive }}
         run: npm publish "$GITHUB_WORKSPACE/$NPM_ARCHIVE" --access public --provenance --ignore-scripts
       - name: Verify npm publication
-        uses: legra-ai/github-actions/.github/actions/verify-registry-publication@8f56349fbf11b804d3f04bfb313d781dbd07da22
+        uses: legra-ai/github-actions/.github/actions/verify-registry-publication@b43be320c2c8e9a59152d08930e651e592ebd57f
         with:
           registry: npm
           package: '@dotenvage/node'
@@ -628,7 +635,7 @@ jobs:
         with:
           packages-dir: pending-wheels/
       - name: Verify complete Python publication
-        uses: legra-ai/github-actions/.github/actions/verify-registry-publication@8f56349fbf11b804d3f04bfb313d781dbd07da22
+        uses: legra-ai/github-actions/.github/actions/verify-registry-publication@b43be320c2c8e9a59152d08930e651e592ebd57f
         with:
           registry: pypi
           package: dotenvage

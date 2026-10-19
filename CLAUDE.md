@@ -89,7 +89,7 @@ load).
 
 ## Code Style
 
-- **Rust Edition**: 2024, MSRV 1.94.1
+- **Rust Edition**: 2024, MSRV 1.97.1
 - **Formatting**: Uses nightly rustfmt with vertical imports grouped
   by std/external/crate
 - **Clippy**: Nightly with strict settings, `-D warnings` enforced
@@ -142,7 +142,7 @@ git commit \
 
 ## Version Management
 
-Use `cargo version-info bump` (requires v0.0.14+) for version
+Use `cargo version-info bump` (pinned at 1.0.0 in CI) for version
 management. This command updates Cargo.toml and creates a commit,
 but does NOT create tags (tags are created by CI after tests pass).
 

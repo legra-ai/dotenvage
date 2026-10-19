@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+import tomllib
 import unittest
 
 
@@ -12,6 +13,21 @@ WORKFLOW = (
 
 class ReleaseWorkflowTests(unittest.TestCase):
     """Keep publishing and validation attached to one immutable revision."""
+
+    def test_build_hook_dependency_has_explicit_checkout_ownership(self) -> None:
+        root = Path(__file__).parents[1]
+        manifest = tomllib.loads((root / 'Cargo.toml').read_text())
+        self.assertRegex(manifest['build-dependencies']['rhusky'], r'^2\.[0-9]+\.[0-9]+$')
+        self.assertIn('install_from_build_script(env!("CARGO_MANIFEST_DIR"))',
+                      (root / 'build.rs').read_text())
+        self.assertNotIn('RHUSKY_REPOSITORY_ROOT', (root / '.cargo/config.toml').read_text())
+
+    def test_compiler_pin_supports_the_current_hook_dependency(self) -> None:
+        root = Path(__file__).parents[1]
+        manifest = tomllib.loads((root / 'Cargo.toml').read_text())
+        compiler = tomllib.loads((root / 'rust-toolchain.toml').read_text())['toolchain']['channel']
+        self.assertEqual(compiler, manifest['workspace']['package']['rust-version'])
+        self.assertGreaterEqual(tuple(map(int, compiler.split('.'))), (1, 97, 1))
 
     def test_dependency_merger_cannot_reuse_the_release_writer(self) -> None:
         root = Path(__file__).parents[1]
