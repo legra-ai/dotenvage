@@ -14,6 +14,25 @@ WORKFLOW = (
 class ReleaseWorkflowTests(unittest.TestCase):
     """Keep publishing and validation attached to one immutable revision."""
 
+    def test_npm_installs_use_the_pinned_manager_without_rewriting_inputs(self) -> None:
+        self.assertIn('PNPM_VERSION: "12.14.0"', WORKFLOW)
+        versions = re.findall(r'uses: pnpm/action-setup@[^\n]+\n        with:\n          version: ([^\n]+)', WORKFLOW)
+        self.assertEqual(versions, ['${{ env.PNPM_VERSION }}'] * 2)
+        installs = re.findall(r'run: (pnpm install[^\n]*)', WORKFLOW)
+        self.assertEqual(installs, ['pnpm install --frozen-lockfile'] * 2)
+        publish = WORKFLOW.split('  publish-all:', 1)[1]
+        self.assertNotIn('pnpm/action-setup', publish)
+        self.assertNotIn('run: pnpm install', publish)
+        self.assertIn('["npm", "pack",', (Path(__file__).parents[1] / 'scripts/release-packages.py').read_text())
+
+    def test_recovery_controls_are_loaded_from_the_executing_workflow(self) -> None:
+        build = WORKFLOW.split('  build-artifacts:', 1)[1].split('  validate:', 1)[0]
+        control = build.split('      - name: Checkout release controls\n', 1)[1].split('      - name: Install Rust', 1)[0]
+        self.assertIn('ref: ${{ github.workflow_sha }}', control)
+        self.assertIn('path: release-controls', control)
+        self.assertIn('python3 release-controls/scripts/verify-glibc.py', build)
+        self.assertIn('-s release-controls/tests', build)
+
     def test_build_hook_dependency_has_explicit_checkout_ownership(self) -> None:
         root = Path(__file__).parents[1]
         manifest = tomllib.loads((root / 'Cargo.toml').read_text())
