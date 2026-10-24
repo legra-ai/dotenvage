@@ -34,7 +34,28 @@ fn require_round_trip(value: &str) {
 
 #[test]
 fn public_json_round_trips_without_extra_backslashes() {
+    require_round_trip(r#"{"enabled":true}"#);
     require_round_trip(r#"{"service":"example","labels":["a \"quote\"","C:\\cache"]}"#);
+}
+
+#[test]
+fn single_quoted_input_stays_literal_through_updates() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join(".env");
+    let value = r#"C:\new\cache ${LITERAL_SETTING} "quoted" # text"#;
+    std::fs::write(&path, format!("PUBLIC_CONFIGURATION='{value}'\n")).unwrap();
+    let loader = EnvLoader::with_manager(SecretManager::generate().unwrap());
+    assert_eq!(
+        loader.load_env_file(&path).unwrap()["PUBLIC_CONFIGURATION"],
+        value
+    );
+    loader
+        .set_write_var_in_file(NonSecret("OTHER_SETTING", "ready"), &path)
+        .unwrap();
+    assert_eq!(
+        loader.load_env_file(&path).unwrap()["PUBLIC_CONFIGURATION"],
+        value
+    );
 }
 
 #[test]
