@@ -733,45 +733,86 @@ impl EnvLoader {
     ///
     /// # Errors
     ///
-    /// The current implementation never returns an error; the `Result`
-    /// is retained so the parser can surface I/O or syntax errors in
-    /// future revisions without a breaking API change.
+    /// Returns an error for an unterminated quoted value or unsupported
+    /// double-quoted escape. Unquoted values remain literal. Values encrypted
+    /// with another age key retain the normal per-value decryption policy.
     pub fn parse_and_decrypt(
         &self,
         content: &str,
         path: &Path,
     ) -> SecretsResult<HashMap<String, String>> {
         let mut vars = HashMap::new();
-        for (line_num, line) in content.lines().enumerate() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if let Some((key, value)) = line.split_once('=') {
-                let key = key.trim().to_string();
-                let mut value = value.trim().to_string();
-                if (value.starts_with('"') && value.ends_with('"'))
-                    || (value.starts_with('\'') && value.ends_with('\''))
-                {
-                    value = value[1..value.len() - 1].to_string();
+        for entry in Self::env_file_values(content, path) {
+            let (key, value) = entry?;
+            match self.manager.decrypt_value(&value) {
+                Ok(decrypted) => {
+                    vars.insert(key, decrypted);
                 }
-                match self.manager.decrypt_value(&value) {
-                    Ok(decrypted) => {
-                        vars.insert(key, decrypted);
-                    }
-                    Err(err) => {
-                        eprintln!(
-                            "dotenvage: skipping '{}' in {} (line {}): {}",
-                            key,
-                            path.display(),
-                            line_num + 1,
-                            err
-                        );
-                    }
+                Err(err) => {
+                    eprintln!(
+                        "dotenvage: skipping '{}' in {}: {}",
+                        key,
+                        path.display(),
+                        err
+                    );
                 }
             }
         }
         Ok(vars)
+    }
+
+    /// One literal-value grammar shared by ordinary reads and updates.
+    fn env_file_values<'a>(
+        content: &'a str,
+        path: &'a Path,
+    ) -> impl Iterator<Item = SecretsResult<(String, String)>> + 'a {
+        content.lines().filter_map(move |line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (key, value) = line.split_once('=')?;
+            Some(
+                Self::decode_env_file_value(value.trim(), path)
+                    .map(|value| (key.trim().to_owned(), value)),
+            )
+        })
+    }
+
+    fn decode_env_file_value(value: &str, path: &Path) -> SecretsResult<String> {
+        let invalid = || SecretsError::EnvFileParseFailed {
+            path: path.display().to_string(),
+            reason: "invalid quoted dotenv value".to_owned(),
+        };
+        let body = if let Some(body) = value.strip_prefix('"') {
+            body.strip_suffix('"').ok_or_else(invalid)?
+        } else if let Some(body) = value.strip_prefix('\'') {
+            return body
+                .strip_suffix('\'')
+                .map(ToOwned::to_owned)
+                .ok_or_else(invalid);
+        } else {
+            return Ok(value.to_owned());
+        };
+        let mut decoded = String::with_capacity(body.len());
+        let mut characters = body.chars();
+        while let Some(character) = characters.next() {
+            if character != '\\' {
+                decoded.push(character);
+                continue;
+            }
+            decoded.push(match characters.next().ok_or_else(invalid)? {
+                '\\' => '\\',
+                '"' => '"',
+                '\'' => '\'',
+                '$' => '$',
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                _ => return Err(invalid()),
+            });
+        }
+        Ok(decoded)
     }
 
     /// Gets a decrypted environment variable value from the process
@@ -965,12 +1006,7 @@ impl EnvLoader {
                 reason: e.to_string(),
             })?;
 
-        dotenvy::from_read_iter(content.as_bytes())
-            .collect::<Result<HashMap<String, String>, _>>()
-            .map_err(|e| SecretsError::EnvFileParseFailed {
-                path: path.display().to_string(),
-                reason: e.to_string(),
-            })
+        Self::env_file_values(&content, path).collect()
     }
 
     /// Writes key-value pairs to an env file in sorted KEY=VALUE format.
@@ -1004,15 +1040,27 @@ impl EnvLoader {
     /// Check if a value needs quoting in `.env` output.
     fn needs_env_file_quoting(value: &str) -> bool {
         value.is_empty()
-            || value.contains(char::is_whitespace)
-            || value.contains('$')
-            || value.contains('\n')
-            || value.contains('"')
+            || value.chars().any(|character| {
+                character.is_whitespace() || matches!(character, '$' | '"' | '\'' | '\\' | '#')
+            })
     }
 
     /// Escape a value for `.env` double-quoted output.
     fn escape_env_file_value(value: &str) -> String {
-        value.replace('"', "\\\"")
+        let mut escaped = String::with_capacity(value.len());
+        for character in value.chars() {
+            match character {
+                '\\' | '"' | '$' => {
+                    escaped.push('\\');
+                    escaped.push(character);
+                }
+                '\n' => escaped.push_str("\\n"),
+                '\r' => escaped.push_str("\\r"),
+                '\t' => escaped.push_str("\\t"),
+                _ => escaped.push(character),
+            }
+        }
+        escaped
     }
 
     /// Gets all variable names from all `.env*` files that would be loaded.
