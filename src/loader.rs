@@ -733,41 +733,32 @@ impl EnvLoader {
     ///
     /// # Errors
     ///
-    /// The current implementation never returns an error; the `Result`
-    /// is retained so the parser can surface I/O or syntax errors in
-    /// future revisions without a breaking API change.
+    /// Returns an error for malformed dotenv syntax. Values encrypted with
+    /// another age key retain the normal per-value decryption policy.
     pub fn parse_and_decrypt(
         &self,
         content: &str,
         path: &Path,
     ) -> SecretsResult<HashMap<String, String>> {
         let mut vars = HashMap::new();
-        for (line_num, line) in content.lines().enumerate() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if let Some((key, value)) = line.split_once('=') {
-                let key = key.trim().to_string();
-                let mut value = value.trim().to_string();
-                if (value.starts_with('"') && value.ends_with('"'))
-                    || (value.starts_with('\'') && value.ends_with('\''))
-                {
-                    value = value[1..value.len() - 1].to_string();
+        // Use the same dotenv grammar as the update reader. Removing only
+        // outer quotes leaves the writer's escapes inside public values.
+        for entry in dotenvy::from_read_iter(content.as_bytes()) {
+            let (key, value) = entry.map_err(|_| SecretsError::EnvFileParseFailed {
+                path: path.display().to_string(),
+                reason: "invalid dotenv syntax".to_owned(),
+            })?;
+            match self.manager.decrypt_value(&value) {
+                Ok(decrypted) => {
+                    vars.insert(key, decrypted);
                 }
-                match self.manager.decrypt_value(&value) {
-                    Ok(decrypted) => {
-                        vars.insert(key, decrypted);
-                    }
-                    Err(err) => {
-                        eprintln!(
-                            "dotenvage: skipping '{}' in {} (line {}): {}",
-                            key,
-                            path.display(),
-                            line_num + 1,
-                            err
-                        );
-                    }
+                Err(err) => {
+                    eprintln!(
+                        "dotenvage: skipping '{}' in {}: {}",
+                        key,
+                        path.display(),
+                        err
+                    );
                 }
             }
         }
@@ -1004,15 +995,25 @@ impl EnvLoader {
     /// Check if a value needs quoting in `.env` output.
     fn needs_env_file_quoting(value: &str) -> bool {
         value.is_empty()
-            || value.contains(char::is_whitespace)
-            || value.contains('$')
-            || value.contains('\n')
-            || value.contains('"')
+            || value.chars().any(|character| {
+                character.is_whitespace() || matches!(character, '$' | '"' | '\'' | '\\' | '#')
+            })
     }
 
     /// Escape a value for `.env` double-quoted output.
     fn escape_env_file_value(value: &str) -> String {
-        value.replace('"', "\\\"")
+        let mut escaped = String::with_capacity(value.len());
+        for character in value.chars() {
+            match character {
+                '\\' | '"' | '$' => {
+                    escaped.push('\\');
+                    escaped.push(character);
+                }
+                '\n' => escaped.push_str("\\n"),
+                _ => escaped.push(character),
+            }
+        }
+        escaped
     }
 
     /// Gets all variable names from all `.env*` files that would be loaded.
