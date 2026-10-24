@@ -733,21 +733,17 @@ impl EnvLoader {
     ///
     /// # Errors
     ///
-    /// Returns an error for malformed dotenv syntax. Values encrypted with
-    /// another age key retain the normal per-value decryption policy.
+    /// Returns an error for an unterminated quoted value or unsupported
+    /// double-quoted escape. Unquoted values remain literal. Values encrypted
+    /// with another age key retain the normal per-value decryption policy.
     pub fn parse_and_decrypt(
         &self,
         content: &str,
         path: &Path,
     ) -> SecretsResult<HashMap<String, String>> {
         let mut vars = HashMap::new();
-        // Use the same dotenv grammar as the update reader. Removing only
-        // outer quotes leaves the writer's escapes inside public values.
-        for entry in dotenvy::from_read_iter(content.as_bytes()) {
-            let (key, value) = entry.map_err(|_| SecretsError::EnvFileParseFailed {
-                path: path.display().to_string(),
-                reason: "invalid dotenv syntax".to_owned(),
-            })?;
+        for entry in Self::env_file_values(content, path) {
+            let (key, value) = entry?;
             match self.manager.decrypt_value(&value) {
                 Ok(decrypted) => {
                     vars.insert(key, decrypted);
@@ -763,6 +759,60 @@ impl EnvLoader {
             }
         }
         Ok(vars)
+    }
+
+    /// One literal-value grammar shared by ordinary reads and updates.
+    fn env_file_values<'a>(
+        content: &'a str,
+        path: &'a Path,
+    ) -> impl Iterator<Item = SecretsResult<(String, String)>> + 'a {
+        content.lines().filter_map(move |line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (key, value) = line.split_once('=')?;
+            Some(
+                Self::decode_env_file_value(value.trim(), path)
+                    .map(|value| (key.trim().to_owned(), value)),
+            )
+        })
+    }
+
+    fn decode_env_file_value(value: &str, path: &Path) -> SecretsResult<String> {
+        let invalid = || SecretsError::EnvFileParseFailed {
+            path: path.display().to_string(),
+            reason: "invalid quoted dotenv value".to_owned(),
+        };
+        let body = if let Some(body) = value.strip_prefix('"') {
+            body.strip_suffix('"').ok_or_else(invalid)?
+        } else if let Some(body) = value.strip_prefix('\'') {
+            return body
+                .strip_suffix('\'')
+                .map(ToOwned::to_owned)
+                .ok_or_else(invalid);
+        } else {
+            return Ok(value.to_owned());
+        };
+        let mut decoded = String::with_capacity(body.len());
+        let mut characters = body.chars();
+        while let Some(character) = characters.next() {
+            if character != '\\' {
+                decoded.push(character);
+                continue;
+            }
+            decoded.push(match characters.next().ok_or_else(invalid)? {
+                '\\' => '\\',
+                '"' => '"',
+                '\'' => '\'',
+                '$' => '$',
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                _ => return Err(invalid()),
+            });
+        }
+        Ok(decoded)
     }
 
     /// Gets a decrypted environment variable value from the process
@@ -956,12 +1006,7 @@ impl EnvLoader {
                 reason: e.to_string(),
             })?;
 
-        dotenvy::from_read_iter(content.as_bytes())
-            .collect::<Result<HashMap<String, String>, _>>()
-            .map_err(|e| SecretsError::EnvFileParseFailed {
-                path: path.display().to_string(),
-                reason: e.to_string(),
-            })
+        Self::env_file_values(&content, path).collect()
     }
 
     /// Writes key-value pairs to an env file in sorted KEY=VALUE format.
@@ -1010,6 +1055,8 @@ impl EnvLoader {
                     escaped.push(character);
                 }
                 '\n' => escaped.push_str("\\n"),
+                '\r' => escaped.push_str("\\r"),
+                '\t' => escaped.push_str("\\t"),
                 _ => escaped.push(character),
             }
         }

@@ -69,3 +69,19 @@ fn public_quote_and_comment_characters_are_values() {
         require_round_trip(value);
     }
 }
+
+#[test]
+fn unquoted_input_retains_its_literal_value_rules() {
+    let loader = EnvLoader::with_manager(SecretManager::generate().unwrap());
+    let values = loader.parse_and_decrypt(
+        "WORDS=has spaces\nQUOTE=has\"quotes\nHASH=#literal\nDOLLAR=${DOTENVAGE_ROUNDTRIP_UNSET_421947}\n",
+        std::path::Path::new("literal.env"),
+    ).unwrap();
+    assert_eq!(values.get("WORDS").map(String::as_str), Some("has spaces"));
+    assert_eq!(values.get("QUOTE").map(String::as_str), Some("has\"quotes"));
+    assert_eq!(values.get("HASH").map(String::as_str), Some("#literal"));
+    assert_eq!(
+        values.get("DOLLAR").map(String::as_str),
+        Some("${DOTENVAGE_ROUNDTRIP_UNSET_421947}")
+    );
+}
