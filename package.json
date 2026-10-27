@@ -1,6 +1,6 @@
 {
   "name": "dotenvage-workspace",
-  "version": "0.8.5",
+  "version": "0.8.6",
   "description": "Dotenv with age encryption - Workspace root",
   "private": true,
   "scripts": {
