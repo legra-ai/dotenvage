@@ -10,4 +10,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Trusted metadata-only action: never check out or execute PR code here.
-      - uses: legra-ai/github-actions/.github/actions/conventional-commit@7188f5c63b8dc3512d9a88f3c02f7249ce2e3e5f
+      - uses: legra-ai/github-actions/.github/actions/conventional-commit@cf631c4de1faa1b0635d6dae2211c952d736e3c7
