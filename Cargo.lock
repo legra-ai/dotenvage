@@ -1685,9 +1685,9 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rhusky"
-version = "2.0.1"
+version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9548a7a5c007925ce1965a8a0bbecb34430ab255154c050c7275aedd19788c79"
+checksum = "569164e03f099594e9a40da83e9095d9f88b2a33bc8ce597c4b7015591286194"
 dependencies = [
  "async-fs-io",
  "tokio",
