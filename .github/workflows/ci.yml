@@ -49,7 +49,7 @@ jobs:
       - name: Require binding test failures when the native package cannot load
         run: python3 -m unittest discover -s tests -p test_binding_failures.py
       - name: Install commit validator
-        uses: legra-ai/github-actions/.github/actions/setup-cocogitto@fa33151dee2d92ee71027596452668491871f3c3
+        uses: legra-ai/github-actions/.github/actions/setup-cocogitto@5c494a21a1df770e526e069ddf0dac0c0797e374
       - name: Check commit policy
         run: python3 scripts/test-commit-policy.py
 
@@ -188,7 +188,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
       - name: Prepare validated release revision
         id: version
-        uses: legra-ai/github-actions/.github/actions/prepare-cargo-release@fa33151dee2d92ee71027596452668491871f3c3
+        uses: legra-ai/github-actions/.github/actions/prepare-cargo-release@5c494a21a1df770e526e069ddf0dac0c0797e374
         with:
           token: ${{ github.event_name == 'pull_request' && github.token || steps.writer.outputs.token }}
 
@@ -435,13 +435,13 @@ jobs:
           token: ${{ steps.writer.outputs.token }}
 
       - name: Create Release Tag
-        uses: legra-ai/github-actions/.github/actions/tag-tested-release@fa33151dee2d92ee71027596452668491871f3c3
+        uses: legra-ai/github-actions/.github/actions/tag-tested-release@5c494a21a1df770e526e069ddf0dac0c0797e374
         with:
           version: ${{ needs.version-check.outputs.new_version }}
           revision: ${{ needs.version-check.outputs.revision }}
 
       - name: Generate Changelog
-        uses: legra-ai/github-actions/.github/actions/generate-changelog@fa33151dee2d92ee71027596452668491871f3c3
+        uses: legra-ai/github-actions/.github/actions/generate-changelog@5c494a21a1df770e526e069ddf0dac0c0797e374
         with:
           revision: ${{ needs.version-check.outputs.revision }}
           output-file: CHANGELOG_RELEASE.md
@@ -605,7 +605,7 @@ jobs:
         run: python3 scripts/release-packages.py stage
 
       - name: Publish to crates.io
-        uses: legra-ai/github-actions/.github/actions/publish-tested-crate@fa33151dee2d92ee71027596452668491871f3c3
+        uses: legra-ai/github-actions/.github/actions/publish-tested-crate@5c494a21a1df770e526e069ddf0dac0c0797e374
         with:
           crate: dotenvage
           version: ${{ needs.version-check.outputs.new_version }}
@@ -622,7 +622,7 @@ jobs:
           NPM_ARCHIVE: ${{ steps.npm.outputs.npm_archive }}
         run: npm publish "$GITHUB_WORKSPACE/$NPM_ARCHIVE" --access public --provenance --ignore-scripts
       - name: Verify npm publication
-        uses: legra-ai/github-actions/.github/actions/verify-registry-publication@fa33151dee2d92ee71027596452668491871f3c3
+        uses: legra-ai/github-actions/.github/actions/verify-registry-publication@5c494a21a1df770e526e069ddf0dac0c0797e374
         with:
           registry: npm
           package: '@dotenvage/node'
@@ -639,7 +639,7 @@ jobs:
         with:
           packages-dir: pending-wheels/
       - name: Verify complete Python publication
-        uses: legra-ai/github-actions/.github/actions/verify-registry-publication@fa33151dee2d92ee71027596452668491871f3c3
+        uses: legra-ai/github-actions/.github/actions/verify-registry-publication@5c494a21a1df770e526e069ddf0dac0c0797e374
         with:
           registry: pypi
           package: dotenvage
