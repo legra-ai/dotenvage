@@ -190,9 +190,9 @@ dependencies = [
 
 [[package]]
 name = "async-fs-io"
-version = "0.2.3"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9e93ad633a3724b47ab1d4e39924c7157240cebb686e42fff70902ad57115f4"
+checksum = "1d2e5792ff14a3bd92125c08a3d61143a6851105961eca08b420b69cd298a001"
 dependencies = [
  "fs2",
  "thiserror 2.0.21",
@@ -1232,9 +1232,9 @@ dependencies = [
 
 [[package]]
 name = "napi"
-version = "3.16.0"
+version = "3.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4febd3f6e8b57aa986853be5b24f80a1856753535219aec431cce854cd666fc"
+checksum = "907ff7366fb7182e28edd0f08ef8ac5d6b13b8d65a3c0b3a10bf3ac092437d6b"
 dependencies = [
  "bitflags",
  "ctor",
