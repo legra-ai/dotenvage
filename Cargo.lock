@@ -594,7 +594,7 @@ dependencies = [
 
 [[package]]
 name = "dotenvage"
-version = "0.8.17"
+version = "0.8.18"
 dependencies = [
  "age",
  "anyhow",
@@ -619,7 +619,7 @@ dependencies = [
 
 [[package]]
 name = "dotenvage-napi"
-version = "0.8.17"
+version = "0.8.18"
 dependencies = [
  "age",
  "dotenvage",
@@ -632,7 +632,7 @@ dependencies = [
 
 [[package]]
 name = "dotenvage-pyo3"
-version = "0.8.17"
+version = "0.8.18"
 dependencies = [
  "age",
  "dotenvage",
@@ -1685,9 +1685,9 @@ checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
 name = "rhusky"
-version = "2.0.3"
+version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55d5567ed9d191f2254a7ce32832b02e0fe617a295369a768da4085fb2569dec"
+checksum = "d1ee25e0e4f157fd2a6e25674bf9665d2e5c9f9911de17a2a5a8697d1b074f99"
 dependencies = [
  "async-fs-io",
  "tokio",
