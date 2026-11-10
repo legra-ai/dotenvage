@@ -749,8 +749,8 @@ packages:
       node-addon-api:
         optional: true
 
-  es-toolkit@1.53.1:
-    resolution: {integrity: sha512-VhMc6IXmexu8iYFfL2aaAww6IvJTdHlqBLruLoEUs33YD4IcP5DdZcLOybMsMmmLsiy1c8PsiLsrM0DdIuuRUA==}
+  es-toolkit@1.53.2:
+    resolution: {integrity: sha512-iUqZ+NlwH4jUgRmXZUxFBsV/9762TQEa1O4IXLFBmDEjVHScBytKuseX23I0+v9ShZ5MYxEx6WKNzm6IPnex8g==}
 
   fast-string-truncated-width@3.0.3:
     resolution: {integrity: sha512-0jjjIEL6+0jag3l2XWWizO64/aZVtpiGE3t0Zgqxv0DPuxiMjvB3M24fCyhZUO4KomJQPj3LTSUnDP3GpdwC0g==}
@@ -962,7 +962,7 @@ snapshots:
       '@octokit/rest': 22.0.1
       clipanion: 4.0.0-rc.4(typanion@3.14.0)
       colorette: 2.0.20
-      es-toolkit: 1.53.1
+      es-toolkit: 1.53.2
       js-yaml: 5.5.0
       obug: 3.0.0
       semver: 7.8.6
@@ -1367,7 +1367,7 @@ snapshots:
   emnapi@1.9.2:
     optional: true
 
-  es-toolkit@1.53.1: {}
+  es-toolkit@1.53.2: {}
 
   fast-string-truncated-width@3.0.3: {}
 
