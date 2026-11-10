@@ -13,7 +13,7 @@ wheels = [
 
 [[package]]
 name = "dotenvage"
-version = "0.8.20"
+version = "0.8.21"
 source = { editable = "." }
 
 [package.dev-dependencies]
