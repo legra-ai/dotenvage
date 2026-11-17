@@ -171,5 +171,21 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertNotIn("cargo +nightly", WORKFLOW)
 
 
+class ReleaseApprovalTests(unittest.TestCase):
+    def test_minor_and_major_plans_wait_for_owner_review_before_preparation(self):
+        plan = WORKFLOW.split("\n  plan:\n", 1)[1].split("\n  approve-release:\n", 1)[0]
+        self.assertIn("plan-only: 'true'", plan)
+        self.assertIn("token: ${{ github.token }}", plan)
+        self.assertNotIn("RELEASE_WRITER", plan)
+        self.assertIn('f"Approve {level} release {version} "', plan)
+        approval = WORKFLOW.split("\n  approve-release:\n", 1)[1].split("\n  version-check:\n", 1)[0]
+        self.assertIn("environment: ${{ needs.plan.outputs.approval-required == 'true' "
+                      "&& 'release-approval' || '' }}", approval)
+        self.assertNotIn("\n    if:", approval)
+        self.assertIn("\n  version-check:\n    name: Prepare Release\n    needs: [plan, approve-release]\n",
+                      WORKFLOW)
+        self.assertIn("\n  actions: read\n", WORKFLOW)
+        self.assertNotIn("major-release", WORKFLOW)
+
 if __name__ == "__main__":
     unittest.main()
