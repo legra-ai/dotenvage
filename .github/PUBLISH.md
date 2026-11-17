@@ -9,7 +9,13 @@ a separate publisher.
 The shared `prepare-cargo-release` action considers every commit since the last
 release: fixes and dependency changes produce a patch, features a minor, and
 declared breaking changes a major. Documentation, style and CI-only commits do
-not independently release. An explicitly higher manifest version is respected.
+not independently release. An explicitly higher manifest version is respected
+only while it covers every commit since the last published tag.
+
+Patch releases are fully automatic. Minor and major releases wait in the
+`release-approval` environment for jgeluk's review with the exact comment
+`Approve <level> release <version> from <sha>` shown in the plan job summary;
+preparation verifies it before writing the version commit.
 
 When needed, `cargo version-info` updates Rust manifests and lockfiles and runs
 the configured companion-version hook for npm, Python and the root package.

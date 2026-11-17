@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -164,9 +165,59 @@ jobs:
         working-directory: python
         run: uv run pytest tests/ -v
 
+  # Read-only release plan; minor and major plans wait for the owner's review.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      approval-required: ${{ steps.release.outputs.approval-required }}
+      bump-level: ${{ steps.release.outputs.bump-level }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: legra-ai/github-actions/.github/actions/prepare-cargo-release@8cdaad621c581c2f59e5eb0dfafc05f635c12c0a
+        id: release
+        with:
+          token: ${{ github.token }}
+          plan-only: 'true'
+      - name: Show release proposal
+        env:
+          PROPOSED_VERSION: ${{ steps.release.outputs.version }}
+          BUMP_LEVEL: ${{ steps.release.outputs.bump-level }}
+          APPROVAL_REQUIRED: ${{ steps.release.outputs.approval-required }}
+          WORKFLOW_SOURCE: ${{ github.sha }}
+        run: |
+          python3 - <<'SUMMARY'
+          import os
+          level = os.environ['BUMP_LEVEL'] or 'none'
+          version = os.environ['PROPOSED_VERSION']
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write(f"Proposed version: {version} ({level})\n\n")
+              if os.environ['APPROVAL_REQUIRED'] == 'true':
+                  summary.write(f"This {level} release requires your explicit review in the "
+                                "release-approval environment. Use this exact approval comment:\n\n")
+                  summary.write(f"Approve {level} release {version} "
+                                f"from {os.environ['WORKFLOW_SOURCE']}\n")
+          SUMMARY
+
+  approve-release:
+    # Minor and major releases wait for the owner's review in the
+    # release-approval environment; preparation verifies the exact comment.
+    # The job always runs (patch plans select no environment), so no
+    # descendant job inherits a skipped ancestor.
+    name: Release approval (${{ needs.plan.outputs.bump-level || 'none' }} ${{ needs.plan.outputs.version }})
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: ${{ needs.plan.outputs.approval-required == 'true' && 'release-approval' || '' }}
+    steps:
+      - name: Continue after any required environment review
+        run: python3 -c 'print("Preparation verifies the exact owner approval for minor and major releases.")'
+
   # Prepare one revision for all language checks and release artifacts.
   version-check:
     name: Prepare Release
+    needs: [plan, approve-release]
     runs-on: ubuntu-latest
     permissions:
       contents: write
