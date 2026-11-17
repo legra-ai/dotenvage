@@ -179,6 +179,7 @@ jobs:
       - uses: legra-ai/github-actions/.github/actions/prepare-cargo-release@8cdaad621c581c2f59e5eb0dfafc05f635c12c0a
         id: release
         with:
+          breaking-change-bump: minor
           token: ${{ github.token }}
           plan-only: 'true'
       - name: Show release proposal
@@ -241,6 +242,7 @@ jobs:
         id: version
         uses: legra-ai/github-actions/.github/actions/prepare-cargo-release@8cdaad621c581c2f59e5eb0dfafc05f635c12c0a
         with:
+          breaking-change-bump: minor
           token: ${{ github.event_name == 'pull_request' && github.token || steps.writer.outputs.token }}
 
   # Build all artifacts BEFORE creating release
