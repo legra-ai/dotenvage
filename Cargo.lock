@@ -597,7 +597,7 @@ dependencies = [
 
 [[package]]
 name = "dotenvage"
-version = "0.8.32"
+version = "0.8.33"
 dependencies = [
  "age",
  "anyhow",
@@ -622,7 +622,7 @@ dependencies = [
 
 [[package]]
 name = "dotenvage-napi"
-version = "0.8.32"
+version = "0.8.33"
 dependencies = [
  "age",
  "dotenvage",
@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "dotenvage-pyo3"
-version = "0.8.32"
+version = "0.8.33"
 dependencies = [
  "age",
  "dotenvage",
