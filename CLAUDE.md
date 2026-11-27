@@ -69,7 +69,7 @@ npm test
 
 ### Node.js Bindings (`npm/`)
 
-- NAPI-RS bindings with pre-built binaries for 9 platforms
+- NAPI-RS bindings with pre-built binaries for 8 platforms
 - Next.js integration module in `npm/nextjs/`
 - Tests in `npm/__tests__/`
 

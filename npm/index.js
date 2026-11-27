@@ -190,21 +190,7 @@ function requireNative() {
       loadErrors.push(e)
     }
     if (process.arch === 'x64') {
-      try {
-        return require('./dotenvage-napi.darwin-x64.node')
-      } catch (e) {
-        loadErrors.push(e)
-      }
-      try {
-        const binding = require('@dotenvage/node-darwin-x64')
-        const bindingPackageVersion = require('@dotenvage/node-darwin-x64/package.json').version
-        if (bindingPackageVersion !== '0.7.1' && process.env.NAPI_RS_ENFORCE_VERSION_CHECK && process.env.NAPI_RS_ENFORCE_VERSION_CHECK !== '0') {
-          throw new Error(`Native binding package version mismatch, expected 0.7.1 but got ${bindingPackageVersion}. You can reinstall dependencies to fix this issue.`)
-        }
-        return binding
-      } catch (e) {
-        loadErrors.push(e)
-      }
+      loadErrors.push(new Error('Unsupported platform: Intel macOS (darwin-x64) is no longer supported by dotenvage; use Apple Silicon (darwin-arm64)'))
     } else if (process.arch === 'arm64') {
       try {
         return require('./dotenvage-napi.darwin-arm64.node')

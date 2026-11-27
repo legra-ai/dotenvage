@@ -61,7 +61,6 @@ Download pre-built binaries from
 
 - Linux (x86_64): `dotenvage-x86_64-unknown-linux-gnu.zip`
 - Linux (ARM64): `dotenvage-aarch64-unknown-linux-gnu.zip`
-- macOS (Intel): `dotenvage-x86_64-apple-darwin.zip`
 - macOS (Apple Silicon): `dotenvage-aarch64-apple-darwin.zip`
 - Windows (x86_64): `dotenvage-x86_64-pc-windows-msvc.zip`
 - Windows (ARM64): `dotenvage-aarch64-pc-windows-msvc.zip`
