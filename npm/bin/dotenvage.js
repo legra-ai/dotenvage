@@ -26,6 +26,13 @@ function getBinaryName() {
 
   const rustArch = archMap[architecture] || architecture;
 
+  if (plat === "darwin" && architecture === "x64") {
+    console.error(
+      "dotenvage: unsupported platform: Intel macOS (darwin-x64) is no longer supported; use Apple Silicon (darwin-arm64)"
+    );
+    process.exit(1);
+  }
+
   if (plat === "win32") {
     return `dotenvage-${rustArch}-pc-windows-msvc.exe`;
   } else if (plat === "darwin") {
