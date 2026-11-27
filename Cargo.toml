@@ -23,7 +23,6 @@ keywords = ["dotenv", "age", "encryption", "secrets", "cli"]
 categories = ["cryptography", "config", "command-line-utilities"]
 readme = "README.md"
 documentation = "https://docs.rs/dotenvage"
-homepage = "https://github.com/legra-ai/dotenvage"
 publish = true
 
 include = [
@@ -78,6 +77,12 @@ windows-native-keyring-store = { version = "1.1", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.32", features = ["user"] }
+
+[lints.cargo]
+# build.rs only installs the repository Git hooks and is deliberately left out
+# of the published crate (scripts/test-package.py), so the rhusky build
+# dependency it uses is unused in the packaged manifest.
+unused_dependencies = "allow"
 
 [build-dependencies]
 rhusky = "2.0.1"
