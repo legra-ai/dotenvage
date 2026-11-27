@@ -19,7 +19,8 @@ if [[ "$UNAME_SYS" == "darwin" ]]; then
   if [[ "$NATIVE_ARCH" == "aarch64" ]]; then
     echo "aarch64-apple-darwin"
   else
-    echo "x86_64-apple-darwin"
+    echo "unsupported: Intel macOS (x86_64-apple-darwin) is no longer supported" >&2
+    exit 1
   fi
 elif [[ "$UNAME_SYS" == "linux" ]]; then
   if [[ "$NATIVE_ARCH" == "aarch64" ]]; then
