@@ -20,10 +20,9 @@
    - Updates root `package.json` if present
 
 3. **All Platform Binaries Built** ✅
-   - Successfully built for all 6 platforms including:
+   - Successfully built for all 5 platforms including:
      - ✅ `x86_64-unknown-linux-gnu` (Vercel needs this!)
      - ✅ `aarch64-unknown-linux-gnu`
-     - ✅ `x86_64-apple-darwin`
      - ✅ `aarch64-apple-darwin`
      - ✅ `x86_64-pc-windows-msvc`
      - ✅ `aarch64-pc-windows-msvc`
