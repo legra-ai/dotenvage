@@ -23,13 +23,13 @@ keywords = ["dotenv", "age", "encryption", "secrets", "cli"]
 categories = ["cryptography", "config", "command-line-utilities"]
 readme = "README.md"
 documentation = "https://docs.rs/dotenvage"
-homepage = "https://github.com/legra-ai/dotenvage"
 publish = true
 
 include = [
     "src/**",
     "tests/*.rs",
     "examples/*.rs",
+    "build.rs",
     "Cargo.toml",
     "Cargo.lock",
     "README.md",
