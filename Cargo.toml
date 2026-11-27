@@ -3,7 +3,7 @@ members = ["npm/dotenvage-napi", "python/dotenvage-pyo3"]
 resolver = "2"
 
 [workspace.package]
-version = "0.8.33"
+version = "0.8.34"
 edition = "2024"
 authors = ["Jacobus Geluk <jacobus.geluk@dataroad.com>"]
 repository = "https://github.com/legra-ai/dotenvage"
@@ -13,7 +13,7 @@ license = "MIT OR Apache-2.0"
 [package]
 name = "dotenvage"
 description = "Dotenv with age encryption: encrypt/decrypt secrets in .env files"
-version = "0.8.33"
+version = "0.8.34"
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -23,7 +23,6 @@ keywords = ["dotenv", "age", "encryption", "secrets", "cli"]
 categories = ["cryptography", "config", "command-line-utilities"]
 readme = "README.md"
 documentation = "https://docs.rs/dotenvage"
-homepage = "https://github.com/legra-ai/dotenvage"
 publish = true
 
 include = [
@@ -78,6 +77,12 @@ windows-native-keyring-store = { version = "1.1", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.32", features = ["user"] }
+
+[lints.cargo]
+# build.rs only installs the repository Git hooks and is deliberately left out
+# of the published crate (scripts/test-package.py), so the rhusky build
+# dependency it uses is unused in the packaged manifest.
+unused_dependencies = "allow"
 
 [build-dependencies]
 rhusky = "2.0.1"
