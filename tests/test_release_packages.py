@@ -23,6 +23,18 @@ release = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(release)
 
 
+class WheelCountTests(unittest.TestCase):
+    """The workflow's wheel check and the release script agree on the platform count."""
+
+    def test_four_platform_wheels_without_intel_macos(self):
+        self.assertEqual(release.PYTHON_PLATFORM_WHEELS, 4)
+
+    def test_publish_workflow_checks_the_same_count(self):
+        workflow = (Path(__file__).parents[1] / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn(f'if [ "$WHEEL_COUNT" -ne {release.PYTHON_PLATFORM_WHEELS} ]; then', workflow)
+        self.assertNotIn("macosx_10", workflow)
+
+
 class RegistryTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()

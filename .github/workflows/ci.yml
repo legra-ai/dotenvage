@@ -637,8 +637,8 @@ jobs:
           ls -lh python-wheels/*.whl
           WHEEL_COUNT=$(find python-wheels -name "*.whl" | wc -l | tr -d ' ')
           echo "Found $WHEEL_COUNT wheel file(s)"
-          if [ "$WHEEL_COUNT" -lt 5 ]; then
-            echo "Expected at least 5 wheels, found $WHEEL_COUNT" >&2
+          if [ "$WHEEL_COUNT" -ne 4 ]; then
+            echo "Expected exactly 4 wheels (Linux x86_64 and aarch64, macOS arm64, Windows x86_64), found $WHEEL_COUNT" >&2
             exit 1
           fi
 
