@@ -101,6 +101,15 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertIn("python3 scripts/test-package.py", WORKFLOW)
         self.assertIn("cargo doc --locked --no-deps --all-features", WORKFLOW)
 
+    def test_packaged_crate_is_tested_on_the_pinned_toolchain(self) -> None:
+        # The archive is unpacked outside the checkout, beyond rust-toolchain.toml's reach.
+        root = Path(__file__).parents[1]
+        script = (root / "scripts/test-package.py").read_text(encoding="utf-8")
+        self.assertIn('RUSTUP_TOOLCHAIN=pinned_toolchain(root)', script)
+        self.assertIn('environment = dict(toolchain, RUST_TEST_THREADS="1")', script)
+        self.assertIn('cwd=root, env=toolchain, check=True', script)
+        self.assertNotIn('dict(os.environ, RUST_TEST_THREADS', script)
+
     def test_writers_use_scoped_app_tokens(self) -> None:
         root = Path(__file__).parents[1]
         merger = (root / ".github/workflows/dependabot-merge.yml").read_text()
