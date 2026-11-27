@@ -11,14 +11,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+      - uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3
         id: merger
         with:
           app-id: ${{ secrets.RELEASE_MERGER_APP_ID }}
           private-key: ${{ secrets.RELEASE_MERGER_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
-      - uses: legra-ai/github-actions/.github/actions/merge-tested-dependabot@4821c86278ed3b0a7d9b51504a42b4b777863aa0
+      - uses: legra-ai/github-actions/.github/actions/merge-tested-dependabot@e810aeb5bb44fcc25473901a4797035876eb2b66
         with:
           token: ${{ steps.merger.outputs.token }}
           app-id: ${{ secrets.RELEASE_MERGER_APP_ID }}
