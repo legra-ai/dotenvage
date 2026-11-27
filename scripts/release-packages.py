@@ -12,6 +12,10 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 import zipfile
 
+# One stable-ABI wheel per platform: Linux x86_64 and aarch64, macOS arm64 and
+# Windows x86_64. Intel macOS is not built (#200).
+PYTHON_PLATFORM_WHEELS = 4
+
 
 def digest(path, algorithm="sha256"):
     with path.open("rb") as source:
@@ -96,8 +100,8 @@ def stage(version, revision):
         if len(result) != 1:
             raise ValueError("Expected one npm archive")
         wheels = sorted(Path("python-wheels").glob("*.whl"))
-        if len(wheels) != 5:
-            raise ValueError("Expected exactly five Python platform wheels")
+        if len(wheels) != PYTHON_PLATFORM_WHEELS:
+            raise ValueError(f"Expected exactly {PYTHON_PLATFORM_WHEELS} Python platform wheels")
         write_bundle(bundle, version, revision, [Path("npm") / result[0]["filename"], *wheels])
         # No --clobber: an existing release asset must never change identity.
         subprocess.run(["gh", "release", "upload", tag, str(bundle)], check=True)
@@ -126,8 +130,8 @@ def main():
         output("npm_archive", str(archives[0]))
     elif command == "filter-python":
         wheels = sorted(directory.glob("*.whl"))
-        if len(wheels) != 5:
-            raise ValueError("Expected exactly five Python platform wheels")
+        if len(wheels) != PYTHON_PLATFORM_WHEELS:
+            raise ValueError(f"Expected exactly {PYTHON_PLATFORM_WHEELS} Python platform wheels")
         missing = missing_wheels(version, wheels)
         pending = Path("pending-wheels")
         pending.mkdir()
